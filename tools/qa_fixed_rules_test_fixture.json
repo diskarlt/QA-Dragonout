@@ -1,4 +1,27 @@
 {
   "version": 1,
-  "rules": []
+  "rules": [
+    {
+      "rule_id": "decorative_chrome_no_text_overlap",
+      "source_candidate_id": "cal_decorative_chrome_no_text_overlap",
+      "type": "global_visual",
+      "target_id": "global_visual_chrome",
+      "assertion": "장식용 크롬 요소가 본문 텍스트를 가리면 FAIL이다.",
+      "observed_evidence": "테스트 fixture 전용 고정 룰 증거.",
+      "pass_criteria": "장식용 크롬 요소가 텍스트 영역과 겹치지 않아야 한다.",
+      "recommended_fix": "크롬 요소 z-index를 낮추거나 텍스트 영역 여백을 확보한다.",
+      "severity": "P2"
+    },
+    {
+      "rule_id": "start_cta_ssot_contract",
+      "source_candidate_id": "cal_start_cta_ssot_contract",
+      "type": "screen_problem",
+      "target_id": "test_start",
+      "assertion": "시작 화면 CTA는 SSoT 계약의 시작 행동 명칭과 일치해야 한다.",
+      "observed_evidence": "테스트 fixture 전용 고정 룰 증거.",
+      "pass_criteria": "시작 화면 CTA와 주변 문구가 SSoT의 시작 행동 명칭과 일치해야 한다.",
+      "recommended_fix": "CTA 문구를 SSoT 계약의 시작 행동 명칭과 일치하도록 수정한다.",
+      "severity": "P2"
+    }
+  ]
 }

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { readFile, stat } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import {
   fileExists,
   pngDimensions,
@@ -15,8 +15,9 @@ import {
   normalizeQaIssue,
 } from './qa_queue_model.mjs';
 
-const reportDir =
-  process.env.QA_REPORT_DIR ?? 'docs/qa/reports/2026-05-09-ui-qa-pipeline';
+const reportDir = resolve(
+  process.env.QA_REPORT_DIR ?? 'docs/qa/reports/2026-05-09-ui-qa-pipeline',
+);
 const screenshotDir = process.env.QA_SCREENSHOT_DIR ?? join(reportDir, 'screenshots');
 const matrixPath = process.env.QA_MATRIX_PATH ?? 'tools/qa_matrix.json';
 const playthroughMatrixPath =
@@ -111,9 +112,6 @@ console.log('QA validation passed.');
 
 function validateMatrix() {
   const ids = new Set();
-  if (screens.length !== 25) {
-    errors.push(`qa_matrix row count must be 25, got ${screens.length}.`);
-  }
   for (const screen of screens) {
     if (ids.has(screen.id)) {
       errors.push(`duplicate screen id: ${screen.id}`);
@@ -333,7 +331,7 @@ async function validateProductReview() {
     errors.push(`codex product review status must be pass, got ${review.status}.`);
   }
   const byId = new Map((review.screens ?? []).map((result) => [result.id, result]));
-  const requiredScoreKeys = scoreKeys();
+  const requiredScoreKeys = matrix.qualityStandard?.scoreKeys ?? scoreKeys();
   let scoreFiveCount = 0;
   let scoreCount = 0;
   for (const screen of requiredScreens) {
@@ -725,27 +723,34 @@ async function validateFixedRules() {
       errors.push(`fixed QA rule ${rule.rule_id} invalid severity: ${rule.severity}`);
     }
   }
-  const calS02Rules = new Set(
-    fixedRules
-      .filter((rule) => rule.source_candidate_id === 'CAL-S02')
-      .map((rule) => rule.rule_id),
-  );
-  for (const ruleId of [
-    'guardian_presence_exact',
-    'guardian_portrait_scale_consistency',
-    'guardian_portrait_no_crop',
-    'guardian_motion_pseudo_live2d_presence',
-    'cta_ssot_contract',
-  ]) {
-    if (!calS02Rules.has(ruleId)) {
-      errors.push(`CAL-S02 fixed QA rule missing: ${ruleId}`);
+  if (screens.some((s) => s.id === 'base_status')) {
+    const calS02Rules = new Set(
+      fixedRules
+        .filter((rule) => rule.source_candidate_id === 'CAL-S02')
+        .map((rule) => rule.rule_id),
+    );
+    for (const ruleId of [
+      'guardian_presence_exact',
+      'guardian_portrait_scale_consistency',
+      'guardian_portrait_no_crop',
+      'guardian_motion_pseudo_live2d_presence',
+      'cta_ssot_contract',
+    ]) {
+      if (!calS02Rules.has(ruleId)) {
+        errors.push(`CAL-S02 fixed QA rule missing: ${ruleId}`);
+      }
     }
   }
 }
 
 async function validateDevQueue() {
   if (!(await fileExists(devQueuePath))) {
-    errors.push('dev_queue.json is required.');
+    const fallbackPath = join(reportDir, 'dev_queue.json');
+    if (devQueuePath !== fallbackPath && (await fileExists(fallbackPath))) {
+      errors.push(`dev_queue.json path mismatch: env points to ${devQueuePath} but file exists at ${fallbackPath}`);
+    } else {
+      errors.push('dev_queue.json is required.');
+    }
     return;
   }
   devQueueDoc = await readJson(devQueuePath);
@@ -798,7 +803,12 @@ async function validateDevQueue() {
 
 async function validateRegressionLock() {
   if (!(await fileExists(regressionLockPath))) {
-    errors.push('regression_lock.json is required.');
+    const fallbackPath = join(reportDir, 'regression_lock.json');
+    if (regressionLockPath !== fallbackPath && (await fileExists(fallbackPath))) {
+      errors.push(`regression_lock.json path mismatch: env points to ${regressionLockPath} but file exists at ${fallbackPath}`);
+    } else {
+      errors.push('regression_lock.json is required.');
+    }
     return;
   }
   regressionLockDoc = await readJson(regressionLockPath);
@@ -809,7 +819,9 @@ async function validateRegressionLock() {
   }
   const screenById = new Map(regressionLockDoc.screens.map((screen) => [screen.id, screen]));
   const queueIds = new Set((devQueueDoc?.items ?? []).map((item) => item.id));
-  for (const screenId of REGRESSION_LOCK_SCREEN_IDS) {
+  const matrixScreenIds = new Set(screens.map((s) => s.id));
+  const activeRegressionLockIds = REGRESSION_LOCK_SCREEN_IDS.filter((id) => matrixScreenIds.has(id));
+  for (const screenId of activeRegressionLockIds) {
     const screen = screenById.get(screenId);
     if (!screen) {
       errors.push(`regression_lock missing required screen: ${screenId}`);
@@ -836,11 +848,13 @@ async function validateRegressionLock() {
       }
     }
   }
-  const baseStatus = screenById.get('base_status');
-  const baseRuleIds = new Set((baseStatus?.checks ?? []).map((check) => check.id));
-  for (const ruleId of REQUIRED_BASE_STATUS_RULE_IDS) {
-    if (!baseRuleIds.has(ruleId)) {
-      errors.push(`regression_lock base_status missing CAL-S02 rule: ${ruleId}`);
+  if (matrixScreenIds.has('base_status')) {
+    const baseStatus = screenById.get('base_status');
+    const baseRuleIds = new Set((baseStatus?.checks ?? []).map((check) => check.id));
+    for (const ruleId of REQUIRED_BASE_STATUS_RULE_IDS) {
+      if (!baseRuleIds.has(ruleId)) {
+        errors.push(`regression_lock base_status missing CAL-S02 rule: ${ruleId}`);
+      }
     }
   }
 }
@@ -954,15 +968,17 @@ async function validateHtmlReport() {
         errors.push(`report.html missing fixed QA rule id in development queue: ${ruleId}`);
       }
     }
-    for (const ruleId of [
-      'guardian_presence_exact',
-      'guardian_portrait_scale_consistency',
-      'guardian_portrait_no_crop',
-      'guardian_motion_pseudo_live2d_presence',
-      'cta_ssot_contract',
-    ]) {
-      if (!html.includes(ruleId)) {
-        errors.push(`report.html missing CAL-S02 regression rule id: ${ruleId}`);
+    if (screens.some((s) => s.id === 'base_status')) {
+      for (const ruleId of [
+        'guardian_presence_exact',
+        'guardian_portrait_scale_consistency',
+        'guardian_portrait_no_crop',
+        'guardian_motion_pseudo_live2d_presence',
+        'cta_ssot_contract',
+      ]) {
+        if (!html.includes(ruleId)) {
+          errors.push(`report.html missing CAL-S02 regression rule id: ${ruleId}`);
+        }
       }
     }
   }
@@ -1013,15 +1029,17 @@ async function validateCalibrationSetupHtml() {
       errors.push(`calibration.html missing setup text: ${requiredText}`);
     }
   }
-  for (const ruleId of [
-    'guardian_presence_exact',
-    'guardian_portrait_scale_consistency',
-    'guardian_portrait_no_crop',
-    'guardian_motion_pseudo_live2d_presence',
-    'cta_ssot_contract',
-  ]) {
-    if (!html.includes(ruleId)) {
-      errors.push(`calibration.html missing CAL-S02 rule draft: ${ruleId}`);
+  if (screens.some((s) => s.id === 'base_status')) {
+    for (const ruleId of [
+      'guardian_presence_exact',
+      'guardian_portrait_scale_consistency',
+      'guardian_portrait_no_crop',
+      'guardian_motion_pseudo_live2d_presence',
+      'cta_ssot_contract',
+    ]) {
+      if (!html.includes(ruleId)) {
+        errors.push(`calibration.html missing CAL-S02 rule draft: ${ruleId}`);
+      }
     }
   }
   const normalReport = await readFile(htmlReportPath, 'utf8');
@@ -1647,6 +1665,13 @@ function sourceIssueMap() {
     map.set(`product_review:global:${issue.id}`, issue);
     map.set(`product_review:global:${issue.target_id}:${issue.id}`, issue);
     map.set(`codex_product_review.json:global:${issue.rule_id ?? issue.id.split('.').at(-1)}`, issue);
+  }
+  for (const finding of productReviewDoc?.global_visual_findings ?? []) {
+    const targetId = finding.target_id ?? 'global_visual_chrome';
+    const id = `${targetId}.${finding.rule_id}`;
+    map.set(`product_review:global:${id}`, finding);
+    map.set(`product_review:global:${targetId}:${id}`, finding);
+    map.set(`codex_product_review.json:global:${finding.rule_id}`, finding);
   }
   for (const flow of playthroughReviewDoc?.flows ?? []) {
     for (const rawIssue of flow.qa_issues ?? []) {

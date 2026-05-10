@@ -3,7 +3,6 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync as fileExistsSync } from 'node:fs';
 import {
-  cp,
   mkdir,
   mkdtemp,
   readFile,
@@ -13,9 +12,13 @@ import {
 } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { deflateSync } from 'node:zlib';
 
-const sourceReportDir =
-  process.env.QA_REPORT_DIR ?? 'docs/qa/reports/2026-05-09-ui-qa-pipeline';
+const matrixPath = process.env.QA_MATRIX_PATH ?? 'tools/qa_matrix.json';
+const playthroughMatrixPath =
+  process.env.QA_PLAYTHROUGH_MATRIX_PATH ?? 'tools/qa_playthrough_matrix.json';
+const fixedRulesPath = process.env.QA_FIXED_RULES_PATH ?? 'tools/qa_fixed_rules.json';
+
 const tests = [
   ['fail-first artifact validates in not_pass mode', async (dir) => {
     runCurrentReviews(dir);
@@ -805,18 +808,169 @@ const tests = [
       expectFail(dir, 'missing screenshot');
     },
   ],
+  [
+    'stale QA_DEV_QUEUE_PATH env var reports path mismatch not required',
+    async (dir) => {
+      await makeStrictPassFixture(dir);
+      generateReport(dir);
+      const stalePath = join(tmpdir(), 'stale-nonexistent-dev_queue.json');
+      const result = spawnSync(process.execPath, ['tools/qa_validate_report.mjs'], {
+        cwd: process.cwd(),
+        env: {
+          ...process.env,
+          QA_REPORT_DIR: dir,
+          QA_MODE: 'full',
+          QA_EXPECT_FINAL_STATUS: 'pass',
+          QA_DEV_QUEUE_PATH: stalePath,
+          QA_MATRIX_PATH: matrixPath,
+          QA_PLAYTHROUGH_MATRIX_PATH: playthroughMatrixPath,
+          QA_FIXED_RULES_PATH: fixedRulesPath,
+        },
+        encoding: 'utf8',
+      });
+      const output = `${result.stdout}\n${result.stderr}`;
+      if (result.status === 0) {
+        throw new Error('expected failure due to path mismatch, got pass');
+      }
+      if (!output.includes('path mismatch')) {
+        throw new Error(`expected "path mismatch" in error output, got:\n${output}`);
+      }
+      if (output.includes('dev_queue.json is required.')) {
+        throw new Error(
+          `expected "path mismatch" message, not generic "is required." — got:\n${output}`,
+        );
+      }
+    },
+  ],
+  [
+    'global_visual_findings renders rule_id in report.html',
+    async (dir) => {
+      await makeStrictPassFixture(dir);
+      await editReview(dir, (review) => {
+        review.global_visual_findings = [
+          {
+            rule_id: 'decorative_chrome_no_text_overlap',
+            type: 'global_visual',
+            target_id: 'global_visual_chrome',
+            severity: 'P1',
+            observed_evidence:
+              '여러 박스형 HUD에서 괄호/코너 장식이 텍스트 bounding box에 가까워 시야를 방해한다.',
+            pass_criteria:
+              '모든 박스 장식은 텍스트와 CTA bounding box 밖에 있어야 한다.',
+          },
+        ];
+      });
+      generateReport(dir, { expect: 'not_pass' });
+      const html = await readFile(join(dir, 'report.html'), 'utf8');
+      if (!html.includes('decorative_chrome_no_text_overlap')) {
+        throw new Error(
+          'expected report.html to contain global visual rule_id decorative_chrome_no_text_overlap',
+        );
+      }
+      if (!html.includes('전역 visual FAIL 티켓')) {
+        throw new Error('expected report.html to contain 전역 visual FAIL 티켓 section');
+      }
+    },
+  ],
+  [
+    'global_visual_findings validates in not_pass mode',
+    async (dir) => {
+      await makeStrictPassFixture(dir);
+      await editReview(dir, (review) => {
+        review.global_visual_findings = [
+          {
+            rule_id: 'decorative_chrome_no_text_overlap',
+            type: 'global_visual',
+            target_id: 'global_visual_chrome',
+            severity: 'P1',
+            observed_evidence:
+              '여러 박스형 HUD에서 괄호/코너 장식이 텍스트 bounding box에 가까워 시야를 방해한다.',
+            pass_criteria:
+              '모든 박스 장식은 텍스트와 CTA bounding box 밖에 있어야 한다.',
+          },
+        ];
+      });
+      generateReport(dir, { expect: 'not_pass' });
+      expectPass(dir, { expect: 'not_pass' });
+    },
+  ],
+  [
+    'not_pass mode with FAIL product review passes artifact contract',
+    async (dir) => {
+      await makeStrictPassFixture(dir);
+      await editReview(dir, (review) => {
+        review.status = 'fail';
+        const screen = review.screens[0];
+        screen.status = 'fail';
+        screen.ship_readiness = 'needs_polish';
+        screen.review_note = `${screen.screenshot} 원본 390x844에서 시작 화면 CTA 문구가 SSoT 명칭과 달라 사용자 흐름 진입에 혼동을 줄 수 있다.`;
+        screen.rationale = `${screen.screenshot} 기준으로 CTA 문구 불일치가 첫 플레이 진입 흐름에 영향을 준다고 판단했다.`;
+        screen.recommended_fix = `${screen.screenshot} CTA 문구를 SSoT 계약 명칭과 일치하도록 수정한다.`;
+        screen.findings = [
+          {
+            severity: 'P2',
+            code: 'start_cta_ssot_contract_violation',
+            rule_id: 'start_cta_ssot_contract',
+            target_id: screen.id,
+            observed_evidence: `${screen.screenshot} 원본 크기에서 시작 화면 CTA 문구가 SSoT 계약 명칭과 다르게 표기됐다.`,
+            pass_criteria: `${screen.screenshot} 재검수에서 CTA 문구가 SSoT의 시작 행동 명칭과 정확히 일치해야 한다.`,
+            message: `${screen.screenshot}: CTA SSoT 계약 불일치.`,
+          },
+        ];
+        screen.qa_issues = [
+          {
+            id: `${screen.id}.start_cta_ssot_contract_violation`,
+            source: 'product_review',
+            target_type: 'screen',
+            target_id: screen.id,
+            status: 'FAIL',
+            severity: 'P2',
+            category: 'cta_regression',
+            rule_id: 'start_cta_ssot_contract',
+            evidence: {
+              screenshot: screen.screenshot,
+              observed: `${screen.screenshot} 원본 크기에서 시작 화면 CTA 문구가 SSoT 계약 명칭과 다르게 표기됐다.`,
+            },
+            expected: '시작 화면 CTA는 SSoT 계약의 시작 행동 명칭과 일치해야 한다.',
+            recommended_fix: 'CTA 문구를 SSoT 계약 명칭과 일치하도록 수정한다.',
+            pass_condition: `${screen.screenshot} 재검수에서 CTA 문구가 SSoT의 시작 행동 명칭과 정확히 일치해야 한다.`,
+            regression_lock: false,
+            source_pointer: `codex_product_review.json:screens:${screen.id}:start_cta_ssot_contract_violation`,
+          },
+        ];
+      });
+      generateReport(dir, { expect: 'not_pass' });
+      expectPass(dir, { expect: 'not_pass' });
+    },
+  ],
 ];
 
+const testMatrix = JSON.parse(
+  await readFile(matrixPath, 'utf8'),
+);
+
+const failures = [];
 for (const [name, run] of tests) {
   const dir = await mkdtemp(join(tmpdir(), 'dragonout-qa-validator-'));
   try {
-    await cp(sourceReportDir, dir, { recursive: true });
-    await normalizeCaptureResult(dir);
+    await writeBaseFixtureArtifacts(dir, testMatrix);
     await run(dir);
     console.log(`PASS ${name}`);
+  } catch (err) {
+    console.error(`FAIL ${name}`);
+    console.error(`  ${err.message?.split('\n')[0]}`);
+    failures.push({ name, err });
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+}
+if (failures.length > 0) {
+  console.error(`\n${failures.length} test(s) failed:`);
+  for (const { name, err } of failures) {
+    console.error(`\nFAIL: ${name}`);
+    console.error(err.message ?? String(err));
+  }
+  process.exit(1);
 }
 
 async function normalizeCaptureResult(dir) {
@@ -833,13 +987,13 @@ async function normalizeCaptureResult(dir) {
 }
 
 async function makeStrictPassFixture(dir) {
-  const matrixPath = process.env.QA_MATRIX_PATH ?? 'tools/qa_matrix_test_fixture.json';
-  const playthroughMatrixPath = process.env.QA_PLAYTHROUGH_MATRIX_PATH ?? 'tools/qa_playthrough_matrix_test_fixture.json';
-  const fixedRulesPath = process.env.QA_FIXED_RULES_PATH ?? 'tools/qa_fixed_rules_test_fixture.json';
   const matrix = JSON.parse(await readFile(matrixPath, 'utf8'));
   const playthroughMatrix = JSON.parse(await readFile(playthroughMatrixPath, 'utf8'));
   const fixedRules = JSON.parse(await readFile(fixedRulesPath, 'utf8'));
-  const polishLints = JSON.parse(await readFile(join(dir, 'polish_lints.json'), 'utf8'));
+  if (!fileExistsSync(join(dir, 'qa_calibration_candidates.json'))) {
+    runCurrentReviews(dir);
+  }
+  const polishLints = await readJsonIfExists(join(dir, 'polish_lints.json'), {});
   polishLints.summary = {
     pass: matrix.screens.length,
     low_confidence: 0,
@@ -856,7 +1010,11 @@ async function makeStrictPassFixture(dir) {
   }));
   await writeJson(join(dir, 'polish_lints.json'), polishLints);
 
-  const productReview = JSON.parse(await readFile(join(dir, 'codex_product_review.json'), 'utf8'));
+  const productReview = await readJsonIfExists(join(dir, 'codex_product_review.json'), {});
+  productReview.reviewed_by = 'Codex';
+  productReview.review_method =
+    '검증용 fixture: 원본 크기 screenshot, 고정 QA 룰, 한국어 증거를 모두 확인한다.';
+  productReview.viewport = matrix.viewport;
   productReview.status = 'pass';
   productReview.pass_statement = '검증용 fixture: 구체적인 한국어 evidence가 있는 경우만 PASS한다.';
   productReview.fixed_rules_source = null;
@@ -932,6 +1090,32 @@ async function makeStrictPassFixture(dir) {
         regression_lock: ['start', 'base_status', 'guardian_dialog', 'location_dialog', 'outing'].includes(screen.id),
         source_pointer: `codex_product_review.json:screens:${screen.id}:qa_contract_pass`,
       },
+      ...(fixedRules.rules ?? [])
+        .filter((rule) => rule.type === 'screen_problem' && rule.target_id === screen.id)
+        .map((rule) => ({
+            id: `${screen.id}.${rule.rule_id}.fixed_rule_pass`,
+            source: 'product_review',
+            target_type: 'screen',
+            target_id: screen.id,
+            status: 'PASS',
+            severity: rule.severity ?? 'P3',
+            category: 'fixed_rule_check',
+            rule_id: rule.rule_id,
+            evidence: {
+              screenshot: screen.screenshot,
+              observed: `${screen.screenshot} 원본 크기에서 ${rule.rule_id} 고정 룰 기준을 확인했다.`,
+            },
+            expected: rule.assertion,
+            pass_evidence: `${screen.screenshot}에서 ${rule.rule_id} 고정 룰 PASS 근거가 관찰됐다.`,
+            pass_condition: rule.pass_criteria,
+            required_artifact: /motion|live2d/i.test(rule.rule_id) ? ['video_2s'] : undefined,
+            evidence_pointer: /motion|live2d/i.test(rule.rule_id)
+              ? `codex_product_review.json:screens:${screen.id}:${rule.rule_id}.video_2s`
+              : undefined,
+            recommended_fix: '추가 개발 조치 없음. 현재 PASS 기준을 유지한다.',
+            regression_lock: false,
+            source_pointer: `codex_product_review.json:screens:${screen.id}:${rule.rule_id}.fixed_rule_pass`,
+        })),
     ],
     findings: [],
     recommended_fix: `${screen.screenshot} 개발 큐 제외: 확인된 금지 항목이 없으므로 현재 표면과 문구를 유지한다.`,
@@ -997,6 +1181,28 @@ async function makeStrictPassFixture(dir) {
           regression_lock: false,
           source_pointer: `codex_playthrough_review.json:flows:${flow.id}:qa_contract_pass`,
         },
+        ...(fixedRules.rules ?? [])
+          .filter((rule) => rule.type === 'play_experience' && rule.target_id === flow.id)
+          .map((rule) => ({
+            id: `${flow.id}.${rule.rule_id}.fixed_rule_pass`,
+            source: 'playthrough_review',
+            target_type: 'flow',
+            target_id: flow.id,
+            status: 'PASS',
+            severity: rule.severity ?? 'P3',
+            category: 'fixed_rule_check',
+            rule_id: rule.rule_id,
+            evidence: {
+              screenshot: null,
+              observed: `${flow.title} 흐름에서 ${rule.rule_id} 고정 룰 기준을 문구와 CTA 흐름 관찰로 확인했다.`,
+            },
+            expected: rule.assertion,
+            pass_evidence: `${flow.title} transcript에서 ${rule.rule_id} 고정 룰 PASS 근거가 확인됐다.`,
+            pass_condition: rule.pass_criteria,
+            recommended_fix: '추가 개발 조치 없음. 현재 PASS 흐름을 유지한다.',
+            regression_lock: false,
+            source_pointer: `codex_playthrough_review.json:flows:${flow.id}:${rule.rule_id}.fixed_rule_pass`,
+          })),
       ],
       findings: [],
       recommended_fix: `${flow.title} 개발 큐 제외: 현재 fixture 기준에서는 흐름 단절이나 회귀가 없다.`,
@@ -1017,6 +1223,7 @@ async function makeStrictPassFixture(dir) {
     events: [],
   });
   await writeScreenArtifacts(dir, matrix);
+  await writeCaptureFixture(dir, matrix);
   generateReport(dir, { mode: 'full' });
 }
 
@@ -1162,9 +1369,9 @@ function runCurrentReviews(reportDir) {
       QA_CALIBRATION_PROFILE_PATH: join(reportDir, 'qa_calibration_profile.json'),
       QA_CALIBRATION_CANDIDATES_PATH: join(reportDir, 'qa_calibration_candidates.json'),
       QA_POLISH_LINTS_PATH: join(reportDir, 'polish_lints.json'),
-      QA_MATRIX_PATH: process.env.QA_MATRIX_PATH ?? 'tools/qa_matrix_test_fixture.json',
-      QA_PLAYTHROUGH_MATRIX_PATH: process.env.QA_PLAYTHROUGH_MATRIX_PATH ?? 'tools/qa_playthrough_matrix_test_fixture.json',
-      QA_FIXED_RULES_PATH: process.env.QA_FIXED_RULES_PATH ?? 'tools/qa_fixed_rules_test_fixture.json',
+      QA_MATRIX_PATH: matrixPath,
+      QA_PLAYTHROUGH_MATRIX_PATH: playthroughMatrixPath,
+      QA_FIXED_RULES_PATH: fixedRulesPath,
     },
     encoding: 'utf8',
   });
@@ -1258,9 +1465,9 @@ function runValidator(reportDir, options = {}) {
       QA_REPORT_DIR: reportDir,
       QA_MODE: options.mode ?? 'full',
       QA_EXPECT_FINAL_STATUS: options.expect ?? 'pass',
-      QA_MATRIX_PATH: process.env.QA_MATRIX_PATH ?? 'tools/qa_matrix_test_fixture.json',
-      QA_PLAYTHROUGH_MATRIX_PATH: process.env.QA_PLAYTHROUGH_MATRIX_PATH ?? 'tools/qa_playthrough_matrix_test_fixture.json',
-      QA_FIXED_RULES_PATH: process.env.QA_FIXED_RULES_PATH ?? 'tools/qa_fixed_rules_test_fixture.json',
+      QA_MATRIX_PATH: matrixPath,
+      QA_PLAYTHROUGH_MATRIX_PATH: playthroughMatrixPath,
+      QA_FIXED_RULES_PATH: fixedRulesPath,
     },
     encoding: 'utf8',
   });
@@ -1275,9 +1482,9 @@ function generateReport(reportDir, options = {}) {
         QA_REPORT_DIR: reportDir,
         QA_MODE: options.mode ?? 'full',
         QA_EXPECT_FINAL_STATUS: options.expect ?? 'pass',
-        QA_MATRIX_PATH: process.env.QA_MATRIX_PATH ?? 'tools/qa_matrix_test_fixture.json',
-        QA_PLAYTHROUGH_MATRIX_PATH: process.env.QA_PLAYTHROUGH_MATRIX_PATH ?? 'tools/qa_playthrough_matrix_test_fixture.json',
-        QA_FIXED_RULES_PATH: process.env.QA_FIXED_RULES_PATH ?? 'tools/qa_fixed_rules_test_fixture.json',
+        QA_MATRIX_PATH: matrixPath,
+        QA_PLAYTHROUGH_MATRIX_PATH: playthroughMatrixPath,
+        QA_FIXED_RULES_PATH: fixedRulesPath,
       },
       encoding: 'utf8',
     });
@@ -1292,9 +1499,9 @@ function generateReport(reportDir, options = {}) {
       QA_REPORT_DIR: reportDir,
       QA_MODE: options.mode ?? 'full',
       QA_EXPECT_FINAL_STATUS: options.expect ?? 'pass',
-      QA_MATRIX_PATH: process.env.QA_MATRIX_PATH ?? 'tools/qa_matrix_test_fixture.json',
-      QA_PLAYTHROUGH_MATRIX_PATH: process.env.QA_PLAYTHROUGH_MATRIX_PATH ?? 'tools/qa_playthrough_matrix_test_fixture.json',
-      QA_FIXED_RULES_PATH: process.env.QA_FIXED_RULES_PATH ?? 'tools/qa_fixed_rules_test_fixture.json',
+      QA_MATRIX_PATH: matrixPath,
+      QA_PLAYTHROUGH_MATRIX_PATH: playthroughMatrixPath,
+      QA_FIXED_RULES_PATH: fixedRulesPath,
     },
     encoding: 'utf8',
   });
@@ -1305,6 +1512,90 @@ function generateReport(reportDir, options = {}) {
 
 async function writeJson(path, value) {
   await writeFile(path, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+async function readJsonIfExists(path, fallback) {
+  try {
+    return JSON.parse(await readFile(path, 'utf8'));
+  } catch {
+    return fallback;
+  }
+}
+
+async function writeBaseFixtureArtifacts(dir, matrix) {
+  await writeCaptureFixture(dir, matrix);
+  await writeScreenArtifacts(dir, matrix);
+  await writePolishLintsFixture(dir, matrix);
+}
+
+async function writePolishLintsFixture(dir, matrix) {
+  const path = join(dir, 'polish_lints.json');
+  let base = {};
+  try {
+    base = JSON.parse(await readFile(path, 'utf8'));
+  } catch {
+    // no existing file
+  }
+  base.generated_at = new Date().toISOString();
+  base.summary = {
+    pass: matrix.screens.length,
+    low_confidence: 0,
+    fail: 0,
+  };
+  base.results = matrix.screens.map((screen) => ({
+    id: screen.id,
+    screen: screen.screen,
+    state: screen.state,
+    screenshot: screen.screenshot,
+    status: 'pass',
+    metrics: screen.id === 'loading'
+      ? {
+          white_ratio: 0,
+          black_ratio: 0.08,
+          contrast_range: 24,
+        }
+      : null,
+    findings: [],
+  }));
+  await writeJson(path, base);
+}
+
+async function writeCaptureFixture(dir, matrix) {
+  const screenshotsDir = join(dir, 'screenshots');
+  await mkdir(screenshotsDir, { recursive: true });
+  const results = [];
+  for (const screen of matrix.screens) {
+    const screenshotPath = join(screenshotsDir, screen.screenshot);
+    if (!fileExistsSync(screenshotPath)) {
+      const existingScreenshots = await import('node:fs/promises').then(({ readdir }) =>
+        readdir(screenshotsDir).catch(() => []),
+      );
+      const pngSource = existingScreenshots.find((name) => name.endsWith('.png'));
+      if (pngSource) {
+        const { copyFile } = await import('node:fs/promises');
+        await copyFile(join(screenshotsDir, pngSource), screenshotPath);
+      } else {
+        await writeFile(screenshotPath, pngFixture(matrix.viewport.width, matrix.viewport.height));
+      }
+    }
+    const fileStat = await stat(screenshotPath);
+    results.push({
+      id: screen.id,
+      screenshot: screen.screenshot,
+      status: 'captured',
+      path: screenshotPath,
+      bytes: fileStat.size,
+      mtime: fileStat.mtime.toISOString(),
+      width: matrix.viewport.width,
+      height: matrix.viewport.height,
+    });
+  }
+  await writeJson(join(dir, 'capture_result.json'), {
+    mode: 'full',
+    expected_count: matrix.screens.length,
+    captured_count: matrix.screens.length,
+    results,
+  });
 }
 
 async function writeScreenArtifacts(dir, matrix) {
@@ -1338,4 +1629,59 @@ async function writeScreenArtifacts(dir, matrix) {
     viewport: matrix.viewport,
     artifacts,
   });
+}
+
+function pngFixture(width, height) {
+  const bytesPerPixel = 4;
+  const rowBytes = width * bytesPerPixel;
+  const raw = Buffer.alloc((rowBytes + 1) * height);
+  for (let y = 0; y < height; y += 1) {
+    const rowStart = y * (rowBytes + 1);
+    raw[rowStart] = 0;
+    for (let x = 0; x < width; x += 1) {
+      const offset = rowStart + 1 + x * bytesPerPixel;
+      raw[offset] = (x + y) % 256;
+      raw[offset + 1] = (x * 3 + y) % 256;
+      raw[offset + 2] = (x + y * 5) % 256;
+      raw[offset + 3] = 255;
+    }
+  }
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    pngChunk('IHDR', ihdrChunk(width, height)),
+    pngChunk('IDAT', deflateSync(raw)),
+    pngChunk('IEND', Buffer.alloc(0)),
+  ]);
+}
+
+function ihdrChunk(width, height) {
+  const data = Buffer.alloc(13);
+  data.writeUInt32BE(width, 0);
+  data.writeUInt32BE(height, 4);
+  data[8] = 8;
+  data[9] = 6;
+  data[10] = 0;
+  data[11] = 0;
+  data[12] = 0;
+  return data;
+}
+
+function pngChunk(type, data) {
+  const typeBuffer = Buffer.from(type, 'ascii');
+  const length = Buffer.alloc(4);
+  length.writeUInt32BE(data.length, 0);
+  const crc = Buffer.alloc(4);
+  crc.writeUInt32BE(crc32(Buffer.concat([typeBuffer, data])), 0);
+  return Buffer.concat([length, typeBuffer, data, crc]);
+}
+
+function crc32(buffer) {
+  let crc = 0xffffffff;
+  for (const byte of buffer) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) {
+      crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+    }
+  }
+  return (crc ^ 0xffffffff) >>> 0;
 }

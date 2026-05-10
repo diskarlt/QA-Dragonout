@@ -1,6 +1,9 @@
 {
   "version": 1,
   "viewport": { "width": 390, "height": 844 },
+  "qualityStandard": {
+    "scoreKeys": ["visual", "copy", "cta"]
+  },
   "screens": [
     {
       "id": "test_start",
@@ -8,13 +11,37 @@
       "state": "새 게임 시작",
       "qaScreen": "start",
       "screenshot": "test_start.png",
+      "route": "/start",
       "fastQaGroup": "base",
-      "waitMs": 500,
+      "qaCost": "low",
+      "facets": ["copy", "cta"],
+      "acceptanceCriteria": ["시작 화면 레이아웃이 기준을 충족해야 한다."],
+      "knownRiskPatterns": ["CTA 문구 누락"],
+      "requiredEvidence": ["screenshot"],
+      "expected": [
+        {
+          "id": "start_visible",
+          "label": "시작 화면이 보인다",
+          "passIf": "시작 화면 UI가 화면에 렌더링됐다."
+        }
+      ],
+      "implementedEvidence": [
+        {
+          "id": "start_screenshot",
+          "label": "시작 화면 screenshot",
+          "passIf": "screenshot artifact가 존재한다."
+        }
+      ],
+      "forbidden": [
+        {
+          "id": "no_error_overlay",
+          "label": "오류 오버레이 없음",
+          "failIf": "오류 오버레이나 빈 화면이 나타난다."
+        }
+      ],
       "contractChecks": ["visual", "copy"],
-      "failIfMissing": ["visual"],
-      "failIfPresent": [],
-      "expected": ["시작 화면이 보인다"],
-      "forbidden": []
+      "failIfMissing": ["start_visible", "start_screenshot"],
+      "failIfPresent": ["no_error_overlay"]
     }
   ]
 }

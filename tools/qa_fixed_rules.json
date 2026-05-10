@@ -58,7 +58,7 @@
       "severity": "P0"
     },
     {
-      "rule_id": "guardian_motion.pseudo_live2d_presence",
+      "rule_id": "guardian_motion_pseudo_live2d_presence",
       "source_candidate_id": "CAL-S02",
       "type": "screen_problem",
       "target_id": "base_status",

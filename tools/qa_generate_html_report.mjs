@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 
 import { readFile, writeFile } from 'node:fs/promises';
-import { join, relative } from 'node:path';
+import { join, relative, resolve } from 'node:path';
 import { fileExists, readJson, scoreKeys, severityRank } from './qa_lib.mjs';
 
-const reportDir =
-  process.env.QA_REPORT_DIR ?? 'docs/qa/reports/2026-05-09-ui-qa-pipeline';
+const reportDir = resolve(
+  process.env.QA_REPORT_DIR ?? 'docs/qa/reports/2026-05-09-ui-qa-pipeline',
+);
 const screenshotDir = process.env.QA_SCREENSHOT_DIR ?? join(reportDir, 'screenshots');
 const matrixPath = process.env.QA_MATRIX_PATH ?? 'tools/qa_matrix.json';
 const playthroughMatrixPath =
@@ -95,6 +96,7 @@ const liveStatus = (await fileExists(liveStatusPath))
       events: [],
     };
 
+const requiredScoreKeys = matrix.qualityStandard?.scoreKeys ?? scoreKeys();
 const lintById = new Map((lints.results ?? []).map((result) => [result.id, result]));
 const reviewById = new Map((review.screens ?? []).map((result) => [result.id, result]));
 const captureById = new Map((capture.results ?? []).map((result) => [result.id, result]));
@@ -241,7 +243,7 @@ function screenRow(screen) {
   const reviewed = reviewById.get(screen.id);
   const captured = captureById.get(screen.id);
   const scores = reviewed?.scores ?? {};
-  const lowestScore = Math.min(...scoreKeys().map((key) => scores[key] ?? 0));
+  const lowestScore = Math.min(...requiredScoreKeys.map((key) => scores[key] ?? 0));
   const contract = assessScreenContract(screen, reviewed);
   const audit = buildScreenContractAudit(screen, reviewed);
   const severeFindings = [
@@ -489,7 +491,7 @@ function renderScreenRow(row) {
       </div>
       <div class="qa-card-meta">${badge(lint?.status ?? 'missing')} ${badge(reviewed?.ship_readiness ?? 'missing')} <span class="muted">최저점 ${escapeHtml(lowestScore)}</span></div>
       <div class="qa-card-columns">
-        <div class="qa-card-section"><h4>점수</h4>${renderScores(reviewed?.scores ?? {}, lowestScore, scoreKeys())}</div>
+        <div class="qa-card-section"><h4>점수</h4>${renderScores(reviewed?.scores ?? {}, lowestScore, requiredScoreKeys)}</div>
         <div class="qa-card-section"><h4>판정 요약</h4>${renderJudgementSummary(qaJudgementSummary)}</div>
       </div>
       <div class="qa-card-section"><h4>QA 판정 항목</h4>${renderJudgementItems(qaJudgementItems)}</div>

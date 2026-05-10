@@ -204,6 +204,17 @@ async function runJob(job) {
         QA_EXPECT_FINAL_STATUS: 'not_pass',
         QA_REPORT_DIR: job.reportDir,
         QA_SCREENSHOT_DIR: job.screenshotDir,
+        QA_DEV_QUEUE_PATH: join(job.reportDir, 'dev_queue.json'),
+        QA_REGRESSION_LOCK_PATH: join(job.reportDir, 'regression_lock.json'),
+        QA_LIVE_STATUS_PATH: join(job.reportDir, 'qa_live_status.json'),
+        QA_HTML_REPORT_PATH: join(job.reportDir, 'report.html'),
+        QA_MARKDOWN_REPORT_PATH: join(job.reportDir, 'report.md'),
+        QA_CALIBRATION_HTML_PATH: join(job.reportDir, 'calibration.html'),
+        QA_CAPTURE_RESULT_PATH: join(job.reportDir, 'capture_result.json'),
+        QA_POLISH_LINTS_PATH: join(job.reportDir, 'polish_lints.json'),
+        QA_PRODUCT_REVIEW_PATH: join(job.reportDir, 'codex_product_review.json'),
+        QA_PLAYTHROUGH_REVIEW_PATH: join(job.reportDir, 'codex_playthrough_review.json'),
+        QA_SCREEN_ARTIFACTS_PATH: join(job.reportDir, 'screen_artifacts.json'),
       },
     });
     await markJob(job, 'complete', 'complete', `${job.mode} QA 완료`, job.total, job.total);
@@ -402,14 +413,16 @@ async function runProcessStep(job, phase, message, command, args, options = {}) 
   const code = await new Promise((resolve) => child.on('close', resolve));
   job.children = job.children.filter((item) => item !== child);
   job.lastOutput = trimOutput(stdout);
-  job.lastError = trimOutput(stderr);
   if (code !== 0) {
+    job.lastError = trimOutput(stderr);
     if (phase === 'lint') {
       job.automatedGate = 'fail';
       job.codexReview = 'not_entered';
       job.nextAction = '자동 검사 FAIL 화면을 수정한 뒤 Fast QA를 다시 실행하세요.';
     }
     throw new Error(`${message} failed (${code}): ${trimOutput(stderr || stdout)}`);
+  } else {
+    job.lastError = null;
   }
 }
 

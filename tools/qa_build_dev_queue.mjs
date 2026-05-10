@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { readJson } from './qa_lib.mjs';
 import {
   QA_QUEUE_STATUSES,
@@ -17,7 +17,9 @@ import {
   targetTypeForRule,
 } from './qa_queue_model.mjs';
 
-const reportDir = process.env.QA_REPORT_DIR ?? 'docs/qa/reports/2026-05-09-ui-qa-pipeline';
+const reportDir = resolve(
+  process.env.QA_REPORT_DIR ?? 'docs/qa/reports/2026-05-09-ui-qa-pipeline',
+);
 const matrixPath = process.env.QA_MATRIX_PATH ?? 'tools/qa_matrix.json';
 const playthroughMatrixPath =
   process.env.QA_PLAYTHROUGH_MATRIX_PATH ?? 'tools/qa_playthrough_matrix.json';

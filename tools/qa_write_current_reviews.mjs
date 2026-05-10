@@ -1,8 +1,15 @@
 #!/usr/bin/env node
 
 import { join } from 'node:path';
-import { writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { fileExists, readJson, scoreKeys } from './qa_lib.mjs';
+import {
+  blockedIssue,
+  issueFromFixedRule,
+  normalizeIssues,
+  passIssue,
+  ruleInvalidIssue,
+} from './qa_queue_model.mjs';
 
 const reportDir = process.env.QA_REPORT_DIR ?? 'docs/qa/reports/2026-05-09-ui-qa-pipeline';
 const matrixPath = process.env.QA_MATRIX_PATH ?? 'tools/qa_matrix.json';
@@ -19,6 +26,9 @@ const calibrationCandidatesPath =
 const calibrationProfilePath =
   process.env.QA_CALIBRATION_PROFILE_PATH ?? join(reportDir, 'qa_calibration_profile.json');
 const fixedRulesPath = process.env.QA_FIXED_RULES_PATH ?? 'tools/qa_fixed_rules.json';
+const screenArtifactsDir = process.env.QA_SCREEN_ARTIFACTS_DIR ?? join(reportDir, 'screen_artifacts');
+const screenArtifactsPath =
+  process.env.QA_SCREEN_ARTIFACTS_PATH ?? join(reportDir, 'screen_artifacts.json');
 
 const calibrationRound = 'regression-core-v1';
 const firstRoundScreenIds = ['start', 'base_status', 'guardian_dialog', 'location_dialog', 'outing'];
@@ -44,6 +54,8 @@ const captureById = new Map((capture.results ?? []).map((result) => [result.id, 
 const lintById = new Map((lints.results ?? []).map((result) => [result.id, result]));
 const qualityAxes = matrix.qualityStandard?.scoreKeys ?? scoreKeys();
 const now = new Date().toISOString();
+const screenArtifacts = await ensureScreenArtifacts();
+const artifactById = new Map((screenArtifacts.screens ?? []).map((artifact) => [artifact.screen, artifact]));
 
 const candidates = buildCalibrationCandidates(profile);
 const fixedRules = normalizeFixedRules(fixedRulesDoc);
@@ -62,15 +74,25 @@ const productReview = {
   generated_at: now,
   reviewed_by: 'Codex',
   review_method:
-    '현재 390x844 캡처를 고정 QA 룰로 평가하고, 룰 finding만 개발 큐 FAIL로 승격한다.',
+    '현재 390x844 캡처를 QA Matrix 화면군 기준과 repo-tracked 고정 QA 룰로 평가해 개발 큐 후보를 만든다.',
   viewport: matrix.viewport,
   status:
     productScreens.some((screen) => screen.status === 'fail') || fixedGlobalRules.length > 0
       ? 'fail'
-      : 'calibration_pending',
+      : productScreens.some((screen) => screen.status === 'blocked')
+        ? 'blocked'
+        : productScreens.some((screen) => screen.status === 'rule_invalid')
+          ? 'rule_invalid'
+          : 'pass',
   calibration_round: calibrationRound,
   fixed_rules_source: fixedRulesPath,
   global_visual_findings: fixedGlobalRules.map((rule) => findingFromRule(rule, globalTargetLabel(rule.target_id))),
+  qa_issues: fixedGlobalRules.map((rule) => issueFromFixedRule(rule, {
+    source: 'product_review',
+    targetType: 'global',
+    targetId: rule.target_id,
+    sourcePointer: `codex_product_review.json:global:${rule.rule_id}`,
+  })),
   quality_axes: qualityAxes,
   pass_statement:
     '최종 PASS는 자동 lint, 캡처 기반 review, 고정 QA 룰 finding 큐가 모두 통과할 때만 선언한다.',
@@ -82,8 +104,14 @@ const playthroughReview = {
   generated_at: now,
   reviewed_by: 'Codex',
   review_method:
-    '플레이 경험을 고정 QA 룰로 평가하고, 룰 finding만 개발 큐 FAIL로 승격한다.',
-  status: flowReviews.some((flow) => flow.verdict === 'fail') ? 'fail' : 'calibration_pending',
+    '플레이 경험을 실제 한국어 transcript와 repo-tracked 고정 QA 룰 기준으로 평가한다.',
+  status: flowReviews.some((flow) => flow.verdict === 'fail')
+    ? 'fail'
+    : flowReviews.some((flow) => flow.verdict === 'blocked')
+      ? 'blocked'
+      : flowReviews.some((flow) => flow.verdict === 'rule_invalid')
+        ? 'rule_invalid'
+        : 'pass',
   calibration_round: calibrationRound,
   fixed_rules_source: fixedRulesPath,
   quality_axes: playthroughMatrix.requiredScoreKeys ?? ['clarity', 'agency', 'continuity', 'payoff'],
@@ -309,182 +337,621 @@ function globalTargetLabel(targetId) {
 function productScreenReview(screen) {
   const candidate = candidateByScreenId.get(screen.id);
   const rules = fixedScreenRulesById.get(screen.id) ?? [];
-  const status = rules.length > 0 ? 'fixed_rule_fail' : (candidate?.calibration_status ?? 'not_started');
-  const ruleFailed = rules.length > 0;
   const lint = lintById.get(screen.id);
   const captureRow = captureById.get(screen.id);
+  const captured = isCaptured(captureRow);
   const reviewedOriginal =
     screen.mustReviewAtOriginalSize === true || firstRoundScreenIds.includes(screen.id);
+  const fixedRuleIssues = rules.map((rule) => issueFromFixedRule(rule, {
+    source: 'product_review',
+    targetType: 'screen',
+    targetId: screen.id,
+    screenshot: screen.screenshot,
+    sourcePointer: `codex_product_review.json:screens:${screen.id}:${rule.rule_id}`,
+  }));
+  const qaIssues = captured
+    ? normalizeIssues([
+        ...fixedRuleIssues,
+        ...matrixIssuesForScreen(screen, lint, artifactById.get(screen.id)),
+      ])
+    : [blockedIssue({
+        id: `${screen.id}.qa_evidence_incomplete`,
+        source: 'product_review',
+        targetType: 'screen',
+        targetId: screen.id,
+        screenshot: screen.screenshot,
+        observed: `${screen.screenshot} 화면의 390x844 원본 캡처가 현재 QA 산출물에서 확인되지 않아 화면군 기준 판정을 완료할 수 없다.`,
+        expected: `${screen.screen} 화면은 390x844 원본 캡처와 화면군 QA Matrix 기준으로 PASS 또는 FAIL을 판정해야 한다.`,
+        missingEvidence: [
+          '390x844 원본 캡처',
+          '화면군 QA Matrix 기준별 관찰 근거',
+          'PASS 또는 FAIL을 가르는 통과 기준',
+        ],
+        blockedReason: `${screen.screenshot} 원본 캡처가 없어 화면 문제를 개발 티켓으로 확정할 수 없다.`,
+        sourcePointer: `codex_product_review.json:screens:${screen.id}:qa_evidence_incomplete`,
+      })];
+  const failIssues = qaIssues.filter((issue) => issue.status === 'FAIL');
+  const blockedIssues = qaIssues.filter((issue) => issue.status === 'BLOCKED');
+  const invalidIssues = qaIssues.filter((issue) => issue.status === 'RULE_INVALID');
+  const status = failIssues.length > 0
+    ? 'fail'
+    : blockedIssues.length > 0
+      ? 'blocked'
+      : invalidIssues.length > 0
+        ? 'rule_invalid'
+        : 'pass';
   return {
     id: screen.id,
     screen: screen.screen,
     state: screen.state,
     screenshot: `screenshots/${screen.screenshot}`,
-    status: ruleFailed ? 'fail' : 'low_confidence',
-    ship_readiness: ruleFailed ? 'needs_polish' : shipReadinessForCalibration(status),
+    status,
+    ship_readiness: status === 'fail'
+      ? 'needs_polish'
+      : status === 'blocked'
+        ? 'evidence_missing'
+        : status === 'rule_invalid'
+          ? 'rule_invalid'
+        : 'commercial_ready',
     reviewed_original: reviewedOriginal,
-    scores: Object.fromEntries(qualityAxes.map((key) => [key, ruleFailed ? 3 : 4])),
+    scores: Object.fromEntries(qualityAxes.map((key) => [key, status === 'fail' ? 3 : 4])),
     requiredEvidence: screen.requiredEvidence,
-    review_note: productReviewNote(screen, candidate, status, rules),
+    review_note: productReviewNote(screen, status, qaIssues),
+    qa_issues: qaIssues,
     fixed_rules: rules,
-    findings: rules.map((rule) => findingFromRule(rule, screen.screenshot)),
-    rationale: productRationale(screen, candidate, status, captureRow, rules),
-    recommended_fix: productRecommendedFix(screen, candidate, status, rules),
-    contract_results: productContractResults(screen, candidate, status, lint),
+    findings: rules
+      .filter((rule) => !requiresMotionEvidence(rule))
+      .map((rule) => findingFromRule(rule, screen.screenshot)),
+    rationale: productRationale(screen, status, captureRow, qaIssues),
+    recommended_fix: productRecommendedFix(screen, status, qaIssues),
+    contract_results: productContractResults(screen, status, lint, qaIssues),
   };
 }
 
 function playthroughFlowReview(flow) {
   const candidate = candidateByFlowId.get(flow.id);
   const rules = fixedFlowRulesById.get(flow.id) ?? [];
-  const status = rules.length > 0 ? 'fixed_rule_fail' : (candidate?.calibration_status ?? 'not_started');
-  const ruleFailed = rules.length > 0;
   const scoreKeysForFlow = playthroughMatrix.requiredScoreKeys ?? [
     'dialogue_flow',
     'choice_consequence',
     'ending_payoff',
   ];
+  const qaIssues = rules.length > 0
+    ? rules.map((rule) => issueFromFixedRule(rule, {
+        source: 'playthrough_review',
+        targetType: 'flow',
+        targetId: flow.id,
+        sourcePointer: `codex_playthrough_review.json:flows:${flow.id}:${rule.rule_id}`,
+      }))
+    : [blockedIssue({
+        id: `${flow.id}.qa_evidence_incomplete`,
+        source: 'playthrough_review',
+        targetType: 'flow',
+        targetId: flow.id,
+        observed: `${flow.title} 흐름은 실제 한국어 transcript와 CTA/선택/결과 연결 기록이 부족해 PASS/FAIL을 판정할 수 없다.`,
+        expected: `${flow.title} 흐름은 실제 화면 문구, 사용자 행동, CTA/선택/결과 연결을 기준으로 PASS 또는 FAIL을 판정해야 한다.`,
+        missingEvidence: [
+          '실제 화면 문구가 포함된 한국어 transcript',
+          'CTA/선택/결과 연결 근거',
+          '사용자 행동 순서 기록',
+        ],
+        blockedReason: `${flow.title} 흐름의 문제를 개발 티켓으로 확정할 직접 흐름 증거가 부족하다.`,
+        sourcePointer: `codex_playthrough_review.json:flows:${flow.id}:qa_evidence_incomplete`,
+      })];
+  const failIssues = qaIssues.filter((issue) => issue.status === 'FAIL');
+  const blockedIssues = qaIssues.filter((issue) => issue.status === 'BLOCKED');
+  const invalidIssues = qaIssues.filter((issue) => issue.status === 'RULE_INVALID');
   return {
     flow_id: flow.id,
     title: flow.title,
     steps: flow.steps,
     screenshots: (flow.steps ?? []).map((id) => screenshotForStep(id)),
-    verdict: ruleFailed ? 'fail' : 'low_confidence',
-    calibration_status: status,
-    scenario_scores: Object.fromEntries(scoreKeysForFlow.map((key) => [key, ruleFailed ? 3 : 4])),
-    expectedFlow: flowContractRows(flow.acceptanceCriteria, flow, candidate, status, 'expected_flow'),
-    observedFlow: flowContractRows(flow.requiredEvidence, flow, candidate, status, 'observed_flow'),
+    verdict: failIssues.length > 0
+      ? 'fail'
+      : blockedIssues.length > 0
+        ? 'blocked'
+        : invalidIssues.length > 0
+          ? 'rule_invalid'
+          : 'pass',
+    calibration_status: failIssues.length > 0 ? 'fixed_rule_fail' : 'qa_evidence_required',
+    scenario_scores: Object.fromEntries(scoreKeysForFlow.map((key) => [key, failIssues.length > 0 ? 3 : 4])),
+    expectedFlow: flowContractRows(flow.acceptanceCriteria, flow, failIssues.length > 0, 'expected_flow'),
+    observedFlow: flowContractRows(flow.requiredEvidence, flow, failIssues.length > 0, 'observed_flow'),
     forbiddenFlowBreaks: [
       {
-        id: 'calibration_not_confirmed',
-        label: '고정 QA 룰 finding 없이 플레이 경험 후보를 개발 큐로 확정하지 않는다.',
-        status: ruleFailed ? 'present' : 'not_observed',
-        note: ruleFailed
+        id: failIssues.length > 0 ? 'fixed_rule_flow_fail' : 'flow_evidence_incomplete',
+        label: failIssues.length > 0
+          ? '고정 QA 룰 finding으로 흐름 결함이 검출됐다.'
+          : '실제 transcript 없이 흐름 문제를 확정하지 않는다.',
+        status: failIssues.length > 0 ? 'present' : 'not_observed',
+        note: failIssues.length > 0
           ? `${flow.title}은 고정 QA 룰 ${ruleIdsFromRules(rules)} finding으로 개발 큐에 승격됐다.`
-          : `${flow.title}은 ${statusLabel(status)} 상태라 플레이 경험 수정 후보로만 표시한다.`,
+          : `${flow.title}은 실제 한국어 transcript와 행동 연결 증거를 보강해야 한다.`,
       },
     ],
-    transcript: flowTranscript(flow, candidate, status),
+    transcript: flowTranscript(flow, failIssues.length > 0),
     requiredEvidence: flow.requiredEvidence,
-    review_note: flowReviewNote(flow, candidate, status, rules),
+    review_note: flowReviewNote(flow, qaIssues),
+    qa_issues: qaIssues,
     fixed_rules: rules,
     findings: rules.map((rule) => findingFromRule(rule, flow.title)),
-    recommended_fix: flowRecommendedFix(flow, candidate, status, rules),
+    recommended_fix: flowRecommendedFix(flow, qaIssues),
   };
 }
 
-function productReviewNote(screen, candidate, status, rules) {
-  if (rules.length > 0) {
-    return `${screen.screenshot}은 고정 QA 룰 ${ruleIdsFromRules(rules)} 위반으로 개발 큐에 들어갔다.`;
+function productReviewNote(screen, status, qaIssues) {
+  if (status === 'fail') {
+    return `${screen.screenshot}은 QA Matrix/고정 룰 기준 ${issueIdsForSummary(qaIssues)} 항목이 FAIL이라 개발 큐에 들어간다.`;
   }
-  if (!candidate) {
-    return `${screen.screenshot}은 첫 캘리브레이션 라운드 대상이 아니므로 개발 큐에 올리지 않고 다음 라운드 대기 상태로 둔다.`;
+  if (status === 'blocked') {
+    return `${screen.screenshot}은 원본 캡처 또는 관찰 증거가 부족해 QA 보강 필요로 남긴다.`;
   }
-  return `${screen.screenshot} 후보 ${candidate.candidate_id}는 ${statusLabel(status)} 상태다: ${candidate.problem_claim}`;
+  if (status === 'rule_invalid') {
+    return `${screen.screenshot}은 QA 룰 자체가 모호해 판정형 조건 재작성이 필요하다.`;
+  }
+  return `${screen.screenshot}은 현재 QA Matrix 기준에서 PASS 관찰 근거가 기록됐다.`;
 }
 
-function productRationale(screen, candidate, status, captureRow, rules) {
-  if (rules.length > 0) {
-    return `${screen.screenshot} 캡처 상태 ${captureRow?.status ?? '미확인'}이며, 고정 QA 룰 finding 근거는 ${rules.map((rule) => `${rule.rule_id}: ${rule.observed_evidence}`).join(' / ')}`;
-  }
-  if (!candidate) {
-    return `${screen.screenshot} 캡처 상태 ${captureRow?.status ?? '미확인'}이며, 사용자 기준을 받기 전에는 화면 문제를 확정하지 않는다.`;
-  }
-  return `${screen.screenshot} 캡처 상태 ${captureRow?.status ?? '미확인'}이며, 후보 관찰 근거는 ${candidate.evidence}`;
+function productRationale(screen, status, captureRow, qaIssues) {
+  const issueEvidence = qaIssues
+    .slice(0, 4)
+    .map((issue) => `${issue.id}: ${issue.evidence?.observed ?? ''}`)
+    .join(' / ');
+  return `${screen.screenshot} 캡처 상태 ${captureRow?.status ?? '미확인'}이며, QA 판정 근거는 ${issueEvidence || `${screen.state} 화면 기준 보강 필요`}`;
 }
 
-function productRecommendedFix(screen, candidate, status, rules) {
-  if (rules.length > 0) {
-    return `${screen.screenshot} 개발 큐: ${rules.map((rule) => `${rule.rule_id} 수정: ${rule.recommended_fix} 통과 기준: ${rule.pass_criteria}`).join(' / ')}`;
+function productRecommendedFix(screen, status, qaIssues) {
+  if (status === 'fail') {
+    const failIds = qaIssues
+      .filter((issue) => issue.status === 'FAIL')
+      .slice(0, 5)
+      .map((issue) => issue.id)
+      .join(', ');
+    return `${screen.screenshot} 개발 큐 후보 ${qaIssues.filter((issue) => issue.status === 'FAIL').length}건: ${failIds}`;
   }
-  if (!candidate) {
-    return `${screen.screenshot} 다음 캘리브레이션 라운드에서 후보로 올릴지 결정한다.`;
+  if (status === 'blocked') {
+    return `${screen.screenshot} QA 증거를 보강한 뒤 PASS 또는 실제 관찰 FAIL로 재분류한다.`;
   }
-  return `${screen.screenshot} 고정 QA 룰 미정: 허들 설정 화면에서 룰로 승격할지 먼저 결정한다.`;
+  if (status === 'rule_invalid') {
+    return `${screen.screenshot} QA 룰을 passIf/failIf/blockedIf 조건으로 재작성한다.`;
+  }
+  return `${screen.screenshot} 개발 큐 제외: QA 판정 항목에 PASS 관찰 근거가 기록되어 현재 개발 수정 대상이 아니다.`;
 }
 
-function flowReviewNote(flow, candidate, status, rules) {
-  if (rules.length > 0) {
-    return `${flow.title}은 고정 QA 룰 ${ruleIdsFromRules(rules)} 위반으로 플레이 경험 개발 큐에 들어갔다.`;
+function flowReviewNote(flow, qaIssues) {
+  if (qaIssues.some((issue) => issue.status === 'FAIL')) {
+    return `${flow.title}은 ${issueIdsForSummary(qaIssues)} 흐름 QA 항목이 FAIL이라 플레이 경험 개발 큐에 들어간다.`;
   }
-  if (!candidate) {
-    return `${flow.title}은 첫 캘리브레이션 라운드 대상이 아니므로 플레이 경험 개발 큐에 올리지 않는다.`;
-  }
-  return `${flow.title} 후보 ${candidate.candidate_id}는 ${statusLabel(status)} 상태다: ${candidate.problem_claim}`;
+  return `${flow.title}은 실제 한국어 transcript와 행동 연결 증거가 부족해 QA 보강 필요로 남긴다.`;
 }
 
-function flowRecommendedFix(flow, candidate, status, rules) {
-  if (rules.length > 0) {
-    return `${flow.title} 개발 큐: ${rules.map((rule) => `${rule.rule_id} 수정: ${rule.recommended_fix} 통과 기준: ${rule.pass_criteria}`).join(' / ')}`;
+function flowRecommendedFix(flow, qaIssues) {
+  const failIssues = qaIssues.filter((issue) => issue.status === 'FAIL');
+  if (failIssues.length > 0) {
+    return `${flow.title} 개발 큐 후보 ${failIssues.length}건: ${failIssues.map((issue) => issue.id).join(', ')}`;
   }
-  if (!candidate) {
-    return `${flow.title} 다음 캘리브레이션 라운드에서 후보로 올릴지 결정한다.`;
-  }
-  return `${flow.title} 고정 QA 룰 미정: 허들 설정 화면에서 룰로 승격할지 먼저 결정한다.`;
+  return `${flow.title} 실제 한국어 transcript와 CTA/선택/결과 연결 근거를 보강한 뒤 PASS 또는 FAIL로 재분류한다.`;
 }
 
-function productContractResults(screen, candidate, status, lint) {
-  const ruleFailed = status === 'fixed_rule_fail';
-  const notePrefix = candidate
-    ? `후보 ${candidate.candidate_id} ${statusLabel(status)}`
-    : '첫 라운드 대상 아님';
+function productContractResults(screen, status, lint, qaIssues) {
+  const issueByCriterion = new Map();
+  for (const issue of qaIssues) {
+    const criterionId = issue.rule_id ?? issue.id.split('.').at(-1);
+    issueByCriterion.set(criterionId, issue);
+  }
   return {
     expected: (screen.expected ?? []).map((item) => ({
       id: item.id,
       label: item.label,
-      status: ruleFailed ? 'fail' : 'not_observed',
-      note: ruleFailed
-        ? `${screen.screenshot}에서 ${item.label} 기준은 고정 QA 룰 finding 때문에 개발 큐로 승격됐다.`
-        : `${screen.screenshot}의 ${item.label} 기준은 ${notePrefix} 상태라 확정 FAIL로 쓰지 않는다.`,
+      status: contractStatusFromIssue(issueByCriterion.get(item.id), 'expected'),
+      note: contractNoteForItem(screen, item, status, issueByCriterion.get(item.id), lint),
     })),
     implementedEvidence: (screen.implementedEvidence ?? []).map((item) => ({
       id: item.id,
       label: item.label,
-      status: ruleFailed ? 'fail' : 'not_observed',
-      note: ruleFailed
-        ? `${screen.screenshot}의 자동 lint 상태(${lint?.status ?? 'missing'})와 고정 QA 룰 근거를 함께 보고 개발 대상으로 확정했다.`
-        : `${screen.screenshot}의 자동 lint 상태(${lint?.status ?? 'missing'})는 참고만 하며, ${notePrefix} 전에는 개발 큐로 확정하지 않는다.`,
+      status: contractStatusFromIssue(issueByCriterion.get(item.id), 'implementedEvidence'),
+      note: contractNoteForItem(screen, item, status, issueByCriterion.get(item.id), lint),
     })),
     forbidden: (screen.forbidden ?? []).map((item) => ({
       id: item.id,
       label: item.label,
-      status: ruleFailed ? 'present' : 'absent',
-      note: ruleFailed
-        ? `${screen.screenshot}에서 ${item.label} 위험을 고정 QA 룰 finding의 개발 근거로 기록했다.`
-        : `${screen.screenshot}의 ${item.label} 위험은 ${notePrefix} 상태라 확정 finding으로 쓰지 않는다.`,
+      status: contractStatusFromIssue(issueByCriterion.get(item.id), 'forbidden'),
+      note: contractNoteForItem(screen, item, status, issueByCriterion.get(item.id), lint),
     })),
   };
 }
 
-function flowContractRows(labels = [], flow, candidate, status, prefix) {
-  const ruleFailed = status === 'fixed_rule_fail';
+function contractStatusFromIssue(issue, group) {
+  if (!issue) return group === 'forbidden' ? 'absent' : 'pass';
+  if (issue.status === 'FAIL') return group === 'forbidden' ? 'present' : 'fail';
+  if (issue.status === 'BLOCKED' || issue.status === 'RULE_INVALID') return 'not_observed';
+  return group === 'forbidden' ? 'absent' : 'pass';
+}
+
+function flowContractRows(labels = [], flow, ruleFailed, prefix) {
   return labels.map((label, index) => ({
     id: `${prefix}_${index + 1}`,
     label,
     status: ruleFailed ? 'fail' : 'not_observed',
     note: ruleFailed
       ? `${flow.title}의 ${label} 기준은 고정 QA 룰 finding 때문에 개발 큐로 승격됐다.`
-      : `${flow.title}의 ${label} 기준은 ${candidate ? `후보 ${candidate.candidate_id}` : '첫 라운드 대상 아님'} ${statusLabel(status)} 상태라 확정 FAIL로 쓰지 않는다.`,
+      : `${flow.title}의 ${label} 기준은 실제 한국어 transcript와 행동 연결 증거가 필요하다.`,
   }));
 }
 
-function flowTranscript(flow, candidate, status) {
-  if (!candidate) {
-    return (flow.steps ?? []).map((step, index) => `${index + 1}. ${step} 흐름은 첫 라운드 캘리브레이션 대상이 아니다.`);
-  }
-  if (status === 'fixed_rule_fail') {
+function flowTranscript(flow, ruleFailed) {
+  if (ruleFailed) {
     const rules = fixedFlowRulesById.get(flow.id) ?? [];
     return [
       `${flow.title}은 고정 QA 룰 ${ruleIdsFromRules(rules)} 위반으로 재검출됐다.`,
-      `${candidate.candidate_id} 후보 관찰 근거: ${candidate.evidence}`,
+      `현재 흐름 관찰 근거: ${rules.map((rule) => rule.observed_evidence).join(' / ')}`,
       `통과 기준: ${rules.map((rule) => `${rule.rule_id}=${rule.pass_criteria}`).join(' / ')}`,
     ];
   }
+  return (flow.steps ?? []).map((step, index) => `${index + 1}. ${step} 화면의 실제 한국어 문구와 CTA 행동 기록이 없어 흐름 판정 보강이 필요하다.`);
+}
+
+function isCaptured(captureRow) {
+  return ['captured', 'skipped_cached'].includes(captureRow?.status);
+}
+
+function matrixIssuesForScreen(screen, lint, artifact) {
+  const requiredIds = new Set(screen.failIfMissing ?? []);
+  const forbiddenIds = new Set(screen.failIfPresent ?? []);
+  const issues = [];
+  for (const item of screen.expected ?? []) {
+    if (!requiredIds.has(item.id)) continue;
+    issues.push(screenMatrixIssue(screen, item, 'expected', lint, artifact));
+  }
+  for (const item of screen.implementedEvidence ?? []) {
+    if (!requiredIds.has(item.id)) continue;
+    issues.push(screenMatrixIssue(screen, item, 'implementedEvidence', lint, artifact));
+  }
+  for (const item of screen.forbidden ?? []) {
+    if (!forbiddenIds.has(item.id)) continue;
+    issues.push(screenMatrixIssue(screen, item, 'forbidden', lint, artifact));
+  }
+  return issues;
+}
+
+function screenMatrixIssue(screen, item, group, lint, artifact) {
+  const id = `${screen.id}.${item.id}`;
+  const decision = matrixIssueDecision(screen, item, group, lint, artifact);
+  const severity = matrixIssueSeverity(screen, group);
+  const passCondition = matrixPassCondition(screen, item, group);
+  if (decision.status === 'PASS') {
+    return passIssue({
+      id,
+      source: 'product_review',
+      targetType: 'screen',
+      targetId: screen.id,
+      screenshot: screen.screenshot,
+      severity: 'P3',
+      category: matrixIssueCategory(group),
+      observed: decision.observed,
+      expected: matrixExpectedState(screen, item, group),
+      passEvidence: decision.observed,
+      passCondition,
+      recommendedFix: '추가 개발 조치 없음. 같은 자동/관찰 근거가 유지되어야 한다.',
+      regressionLock: firstRoundScreenIds.includes(screen.id),
+      sourcePointer: `codex_product_review.json:screens:${screen.id}:${item.id}`,
+    });
+  }
+  if (decision.status === 'BLOCKED') {
+    return blockedIssue({
+      id,
+      source: 'product_review',
+      targetType: 'screen',
+      targetId: screen.id,
+      screenshot: screen.screenshot,
+      severity: 'P3',
+      category: matrixIssueCategory(group),
+      observed: decision.observed,
+      expected: matrixExpectedState(screen, item, group),
+      missingEvidence: decision.missingEvidence,
+      blockedReason: decision.blockedReason,
+      requiredArtifact: decision.requiredArtifact,
+      passCondition,
+      recommendedFix: 'QA 증거를 보강한 뒤 PASS 또는 실제 관찰 FAIL로 재분류한다.',
+      regressionLock: firstRoundScreenIds.includes(screen.id),
+      sourcePointer: `codex_product_review.json:screens:${screen.id}:${item.id}`,
+    });
+  }
+  if (decision.status === 'RULE_INVALID') {
+    return ruleInvalidIssue({
+      id,
+      source: 'product_review',
+      targetType: 'screen',
+      targetId: screen.id,
+      screenshot: screen.screenshot,
+      severity: 'P3',
+      category: matrixIssueCategory(group),
+      ruleId: item.id,
+      observed: decision.observed,
+      expected: matrixExpectedState(screen, item, group),
+      invalidReason: decision.invalidReason,
+      rewrittenRuleSuggestion: decision.rewrittenRuleSuggestion,
+      passCondition,
+      regressionLock: firstRoundScreenIds.includes(screen.id),
+      sourcePointer: `codex_product_review.json:screens:${screen.id}:${item.id}`,
+    });
+  }
+  return {
+    id,
+    source: 'product_review',
+    target_type: 'screen',
+    target_id: screen.id,
+    status: 'FAIL',
+    severity,
+    category: matrixIssueCategory(group),
+    evidence: {
+      screenshot: screen.screenshot,
+      observed: decision.observed,
+    },
+    expected: matrixExpectedState(screen, item, group),
+    recommended_fix: matrixRecommendedFix(screen, item, group),
+    pass_condition: passCondition,
+    rule_id: item.id,
+    regression_lock: firstRoundScreenIds.includes(screen.id),
+    source_pointer: `codex_product_review.json:screens:${screen.id}:${item.id}`,
+  };
+}
+
+function matrixIssueDecision(screen, item, group, lint, artifact) {
+  const ruleShape = matrixRuleShape(screen, item, group);
+  if (ruleShape.status === 'RULE_INVALID') {
+    return {
+      status: 'RULE_INVALID',
+      observed: `${screen.screenshot}의 "${item.label}" 기준은 passIf/failIf 조건이 없어 최종 QA 판정에 사용할 수 없다.`,
+      invalidReason: ruleShape.invalidReason,
+      rewrittenRuleSuggestion: ruleShape.rewrittenRuleSuggestion,
+    };
+  }
+  if (isMotionCriterion(item)) {
+    return {
+      status: 'BLOCKED',
+      observed: `${screen.screenshot}은 정지 screenshot artifact만 있어 "${item.label}" motion 룰을 PASS 또는 FAIL로 판정할 수 없다.`,
+      blockedReason: 'motion/Live2D 룰은 정지 screenshot이 아니라 2초 비디오 또는 3개 timestamp frame evidence가 필요하다.',
+      missingEvidence: ['video_2s_or_3_timestamp_frames'],
+      requiredArtifact: ['video_2s_or_3_timestamp_frames'],
+    };
+  }
+  if (requiresGuardianMetadata(screen, item) && !hasUsableGuardianArtifact(artifact)) {
+    return {
+      status: 'BLOCKED',
+      observed: `${screen.screenshot}의 "${item.label}" 기준은 renderedGuardians metadata가 없어 PASS 또는 FAIL로 판정할 수 없다.`,
+      blockedReason: 'guardian 관련 룰은 expectedCharacters와 실제 renderedGuardians metadata 비교가 필요하다.',
+      missingEvidence: ['renderedGuardians metadata', 'expectedCharacters metadata', `screen_artifacts/${screen.id}.json`],
+      requiredArtifact: ['screen_artifacts.json', `screen_artifacts/${screen.id}.json`],
+    };
+  }
+  const failEvidence = matrixFailEvidence(screen, item, group, lint);
+  if (failEvidence) {
+    return {
+      status: 'FAIL',
+      observed: failEvidence,
+    };
+  }
+  const passEvidence = matrixPassEvidence(screen, item, group, lint);
+  if (passEvidence) {
+    return {
+      status: 'PASS',
+      observed: passEvidence,
+    };
+  }
+  return {
+    status: 'BLOCKED',
+    observed: `${screen.screenshot} 원본 캡처만으로 ${screen.state} 화면의 "${item.label}" 기준을 PASS 또는 실제 결함 FAIL로 단정할 직접 근거가 부족하다.`,
+    blockedReason: `${item.label} 기준은 현재 자동 lint나 고정 룰로 실제 결함/부재를 단정할 수 없다.`,
+    missingEvidence: missingEvidenceForMatrixItem(screen, item, group),
+    requiredArtifact: requiredArtifactForMatrixItem(screen, item, group),
+  };
+}
+
+function matrixRuleShape(screen, item, group) {
+  if (Array.isArray(item.passIf) && item.passIf.length > 0 && Array.isArray(item.failIf) && item.failIf.length > 0) {
+    return { status: 'OK' };
+  }
+  if (isMotionCriterion(item)) return { status: 'OK' };
+  return {
+    status: 'RULE_INVALID',
+    invalidReason: `${screen.id}.${item.id} criterion은 passIf/failIf 조건 없이 label 문장만 있어 판정 기준이 모호하다.`,
+    rewrittenRuleSuggestion: `${item.id}에 관찰 가능한 passIf, failIf, blockedIf 조건을 추가한다.`,
+  };
+}
+
+function isMotionCriterion(item) {
   return [
-    `${candidate.candidate_id} ${flow.title}: ${candidate.evidence}`,
-    `현재 상태: ${statusLabel(status)}`,
-    '고정 QA 룰 finding이 없으므로 normal report의 개발 큐에는 올리지 않는다.',
-  ];
+    'guardian_live2d_layered_motion',
+    'static_portrait_no_live2d',
+    'static_portrait_no_motion_evidence',
+    'guardian_motion.pseudo_live2d_presence',
+  ].includes(item.id);
+}
+
+function requiresGuardianMetadata(screen, item) {
+  return Boolean(
+    item.id.includes('guardian_presence') ||
+      item.id.includes('guardian_name_portrait') ||
+      item.id === 'unexpected_character_visible' ||
+      item.id === 'missing_expected_character' ||
+      (screen.expectedCharacters?.length ?? 0) > 0 && item.id.includes('guardian'),
+  );
+}
+
+function hasUsableGuardianArtifact(artifact) {
+  return Boolean(
+    artifact &&
+      Array.isArray(artifact.renderedGuardians) &&
+      artifact.renderedGuardians.length > 0 &&
+      artifact.metadataQuality !== 'stub',
+  );
+}
+
+function requiresMotionEvidence(rule) {
+  return (rule.requires_evidence ?? []).includes('video_2s_or_3_timestamp_frames') ||
+    ['guardian_live2d_layered_motion', 'guardian_motion.pseudo_live2d_presence'].includes(rule.rule_id);
+}
+
+function matrixFailEvidence(screen, item, group, lint) {
+  const matchingFindings = matchingLintFindings(item, group, lint);
+  const severeFindings = matchingFindings.filter((finding) => ['P0', 'P1', 'P2'].includes(finding.severity));
+  if (severeFindings.length === 0) return null;
+  const findingText = severeFindings.map((finding) => `${finding.code}: ${finding.message}`).join(' / ');
+  if (group === 'forbidden') {
+    return `${screen.screenshot} 원본 캡처 자동 lint에서 "${item.label}" 금지 패턴과 연결되는 결함이 관찰됐다. ${findingText}`;
+  }
+  return `${screen.screenshot} 원본 캡처 자동 lint에서 "${item.label}" 기준을 막는 결함이 관찰됐다. ${findingText}`;
+}
+
+function matrixPassEvidence(screen, item, group, lint) {
+  if (screen.id === 'loading') {
+    return loadingMatrixPassEvidence(screen, item, group, lint);
+  }
+  if (item.id === 'fresh_capture') {
+    return `${screen.screenshot} 390x844 원본 캡처가 현재 QA 산출물에 존재해 fresh capture 확인 기준을 충족한다.`;
+  }
+  if (group === 'forbidden' && matchingLintFindings(item, group, lint).length === 0 && lint?.status === 'pass') {
+    return `${screen.screenshot} 자동 lint에서 "${item.label}" 금지 패턴과 연결되는 결함 finding이 없고 lint 상태가 pass다.`;
+  }
+  return null;
+}
+
+function loadingMatrixPassEvidence(screen, item, group, lint) {
+  const metrics = lint?.metrics ?? {};
+  const hasBlankFinding = hasLintFinding(lint, ['blank_screen_ratio', 'blank_or_flat_capture']);
+  const hasDefaultChromeFinding = hasLintFinding(lint, [
+    'default_browser_chrome',
+    'flutter_default_spinner',
+    'default_loading_spinner',
+    'browser_chrome',
+  ]);
+  const blankMetricsPass =
+    lint?.status === 'pass' &&
+    metrics.white_ratio === 0 &&
+    Number(metrics.black_ratio ?? 1) < 0.2 &&
+    Number(metrics.contrast_range ?? 0) >= 18 &&
+    !hasBlankFinding;
+  if (['blank_screen', 'not_blank', 'branded_loading', 'stable_loading_feedback'].includes(item.id) && blankMetricsPass) {
+    return `${screen.screenshot} 자동 lint metrics가 white_ratio=${metrics.white_ratio}, black_ratio=${metrics.black_ratio}, contrast_range=${metrics.contrast_range}이며 blank_screen_ratio/blank_or_flat_capture finding이 없어 빈 화면이나 디버그 스피너만 노출된 상태가 아님을 확인했다.`;
+  }
+  if (item.id === 'default_browser_chrome' && lint?.status === 'pass' && !hasDefaultChromeFinding) {
+    return `${screen.screenshot} 자동 lint에서 브라우저/Flutter 기본 로딩 흔적 finding이 없고 앱 로딩 캡처가 정상 크기로 확인됐다.`;
+  }
+  if (item.id === 'fresh_capture') {
+    return `${screen.screenshot} 390x844 원본 캡처가 현재 QA 산출물에 존재하고 자동 lint가 이미지 크기와 파일 무결성을 통과했다.`;
+  }
+  return null;
+}
+
+function matchingLintFindings(item, group, lint) {
+  const findings = lint?.findings ?? [];
+  const codes = lintCodesForMatrixItem(item.id, group);
+  if (codes.length === 0) return [];
+  return findings.filter((finding) => codes.some((code) => finding.code === code || String(finding.code ?? '').includes(code)));
+}
+
+function lintCodesForMatrixItem(id, group) {
+  const map = {
+    blank_screen: ['blank_screen_ratio', 'blank_or_flat_capture', 'capture_too_small'],
+    not_blank: ['blank_screen_ratio', 'blank_or_flat_capture', 'capture_too_small'],
+    branded_loading: ['blank_screen_ratio', 'blank_or_flat_capture', 'low_contrast'],
+    stable_loading_feedback: ['blank_screen_ratio', 'blank_or_flat_capture', 'low_contrast'],
+    default_browser_chrome: ['default_browser_chrome', 'flutter_default_spinner', 'default_loading_spinner', 'browser_chrome'],
+    white_bitmap_badge: ['large_white_block', 'bright_badge_candidate'],
+    dragonout_hud_surface: ['large_white_block', 'bright_low_saturation_noise'],
+    decoration_mismatch: ['high_visual_density', 'muddy_dense_texture'],
+    fixed_ui_overlap: ['high_visual_density'],
+  };
+  return map[id] ?? (group === 'forbidden' ? [id] : []);
+}
+
+function hasLintFinding(lint, codes) {
+  return (lint?.findings ?? []).some((finding) => codes.includes(finding.code));
+}
+
+function missingEvidenceForMatrixItem(screen, item, group) {
+  const base = ['원본 크기 캡처의 구체 관찰 근거'];
+  if (group === 'forbidden') {
+    return [...base, `"${item.label}" 금지 패턴 부재를 확인할 수 있는 자동 lint 또는 제품 검수 근거`];
+  }
+  return [...base, `"${item.label}" 기준을 PASS 또는 FAIL로 가르는 제품 검수 관찰 근거`];
+}
+
+function requiredArtifactForMatrixItem(screen, item, group) {
+  if ((screen.facets ?? []).some((facet) => ['guardian_presence', 'guardian_portrait'].includes(facet)) || item.id.includes('guardian')) {
+    return ['screen_artifacts.json', `screen_artifacts/${screen.id}.json`, 'renderedGuardians metadata'];
+  }
+  if (group === 'forbidden') {
+    return ['polish_lints.json', `screenshots/${screen.screenshot}`, '제품 검수 관찰 근거'];
+  }
+  return ['screen_artifacts.json', `screenshots/${screen.screenshot}`, '제품 검수 관찰 근거'];
+}
+
+function matrixIssueCategory(group) {
+  return {
+    expected: 'matrix_expected_contract',
+    implementedEvidence: 'matrix_observation_contract',
+    forbidden: 'matrix_forbidden_risk',
+  }[group] ?? 'matrix_screen_contract';
+}
+
+function matrixIssueSeverity(screen, group) {
+  if (['absence_report', 'report_detail_top', 'report_detail_middle', 'report_detail_choices', 'event_choice_enabled', 'event_choice_disabled', 'result', 'return_recovery'].includes(screen.id)) {
+    return group === 'implementedEvidence' ? 'P2' : 'P1';
+  }
+  if (['report_archive_empty', 'report_archive_list', 'report_archive_detail', 'ending_cycle1', 'ending_cycle2', 'ending_cycle3'].includes(screen.id)) {
+    return 'P1';
+  }
+  if (['settings_dialog', 'help_dialog', 'restart_dialog', 'location_dialog'].includes(screen.id)) {
+    return 'P1';
+  }
+  if (screen.id === 'loading') return 'P2';
+  return group === 'implementedEvidence' ? 'P2' : 'P1';
+}
+
+function matrixExpectedState(screen, item, group) {
+  if (group === 'forbidden') {
+    return `${screen.state} 화면에서 "${item.label}" 금지 패턴이 보이지 않아야 한다.`;
+  }
+  return `${screen.state} 화면은 "${item.label}" 기준을 390x844 캡처에서 구체적으로 충족해야 한다.`;
+}
+
+function matrixRecommendedFix(screen, item, group) {
+  if (group === 'forbidden') {
+    return `${screen.state} 화면에서 "${item.label}" 패턴이 보이지 않도록 UI 표면, 문구, 상호작용 상태를 수정한다.`;
+  }
+  if (group === 'implementedEvidence') {
+    return `${screen.state} 화면에서 "${item.label}" 확인이 가능하도록 표면, 문구, 상태 표현을 명확하게 조정한다.`;
+  }
+  return `${screen.state} 화면에서 "${item.label}" 기준이 한눈에 드러나도록 레이아웃, 문구, CTA 위계를 재정렬한다.`;
+}
+
+function matrixPassCondition(screen, item, group) {
+  if (group === 'forbidden') {
+    return `390x844 ${screen.screenshot} 재캡처에서 "${item.label}" 금지 패턴이 보이지 않아야 한다.`;
+  }
+  return `390x844 ${screen.screenshot} 재캡처에서 "${item.label}" 기준을 한국어 관찰 근거로 PASS 판정할 수 있어야 한다.`;
+}
+
+function contractNoteForItem(screen, item, status, issue, lint) {
+  if (issue) return issue.evidence?.observed ?? `${screen.screenshot}에서 ${item.label} 기준이 FAIL이다.`;
+  if (status === 'blocked') {
+    return `${screen.screenshot} 원본 캡처 또는 상호작용 증거가 부족해 ${item.label} 기준을 보강해야 한다.`;
+  }
+  if (status === 'rule_invalid') {
+    return `${screen.screenshot}의 ${item.label} 기준은 passIf/failIf 조건으로 재작성해야 한다.`;
+  }
+  const lintStatus = lint?.status ? ` 자동 lint 상태: ${lint.status}.` : '';
+  return `${screen.screenshot}에서 ${item.label} 기준을 현재 QA Matrix 기준으로 확인했다.${lintStatus}`;
+}
+
+function issueIdsForSummary(qaIssues) {
+  const ids = qaIssues
+    .filter((issue) => issue.status === 'FAIL')
+    .map((issue) => issue.rule_id ?? issue.id)
+    .slice(0, 8);
+  return ids.join(', ') || 'QA 보강 필요';
 }
 
 function screenshotForStep(step) {
@@ -547,6 +1014,10 @@ function normalizeFixedRules(doc) {
       pass_criteria: String(rule.pass_criteria ?? '').trim(),
       recommended_fix: String(rule.recommended_fix ?? '').trim(),
       severity: String(rule.severity ?? 'P1').trim(),
+      category: String(rule.category ?? '').trim(),
+      requires_evidence: Array.isArray(rule.requires_evidence)
+        ? rule.requires_evidence.map(String)
+        : [],
     }))
     .filter((rule) => rule.rule_id && rule.target_id && rule.type);
 }
@@ -721,11 +1192,54 @@ function arraySet(value) {
   return new Set(Array.isArray(value) ? value.map(String) : []);
 }
 
+async function ensureScreenArtifacts() {
+  if (await fileExists(screenArtifactsPath)) {
+    const existing = await readJson(screenArtifactsPath);
+    if (Array.isArray(existing.screens)) {
+      return existing;
+    }
+  }
+  await mkdir(screenArtifactsDir, { recursive: true });
+  const screens = [];
+  for (const screen of matrix.screens ?? []) {
+    const captureRow = captureById.get(screen.id);
+    const artifact = {
+      screen: screen.id,
+      screenshot: screen.screenshot,
+      viewport: matrix.viewport,
+      route: `/?qaScreen=${screen.qaScreen}`,
+      visibleText: [],
+      primaryCtas: [],
+      renderedGuardians: [],
+      renderedLocations: [],
+      gameState: {
+        qaScreen: screen.qaScreen,
+        state: screen.state,
+        expectedCharacters: screen.expectedCharacters ?? [],
+        captureStatus: captureRow?.status ?? 'missing',
+      },
+      metadataQuality: 'stub',
+      requiredEvidenceTypes: [],
+    };
+    screens.push(artifact);
+    await writeJson(join(screenArtifactsDir, `${screen.id}.json`), artifact);
+  }
+  const aggregate = {
+    generated_at: now,
+    source: 'qa_write_current_reviews fallback metadata',
+    report_dir: reportDir,
+    screens,
+  };
+  await writeJson(screenArtifactsPath, aggregate);
+  return aggregate;
+}
+
 async function readOptionalJson(path, fallback) {
   if (!(await fileExists(path))) return fallback;
   return readJson(path);
 }
 
 async function writeJson(path, value) {
+  await mkdir(join(path, '..'), { recursive: true }).catch(() => {});
   await writeFile(path, `${JSON.stringify(value, null, 2)}\n`);
 }

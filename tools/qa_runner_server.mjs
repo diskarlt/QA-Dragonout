@@ -138,7 +138,7 @@ async function startJobFromRequest(request, response, mode) {
     message: '대기 중',
     startedAt: new Date().toISOString(),
     current: 0,
-    total: mode === 'refresh' ? 2 : mode === 'fast' ? 6 : 9,
+    total: mode === 'refresh' ? 3 : mode === 'fast' ? 7 : 10,
     events: [],
     children: [],
     cancelled: false,
@@ -189,6 +189,7 @@ async function runJob(job) {
       await runProcessStep(job, 'build', 'flutter build web --debug', 'flutter', ['build', 'web', '--debug'], { cwd: job.targetWorktree });
     }
     await runCapturePipeline(job);
+    await buildDevQueue(job);
     const gateSummary = await qaGateSummary(job);
     job.automatedGate = gateSummary.automatedGate;
     job.codexReview = gateSummary.codexReview;
@@ -308,6 +309,7 @@ async function qaGateSummary(job) {
 }
 
 async function refreshReport(job, message) {
+  await buildDevQueue(job);
   await runProcessStep(job, 'report generation', message, process.execPath, ['tools/qa_generate_html_report.mjs'], {
     cwd: runnerRoot,
     env: {
@@ -322,6 +324,14 @@ async function refreshReport(job, message) {
 
 async function refreshReportAfterFailure(job) {
   try {
+    await runCommand(process.execPath, ['tools/qa_build_dev_queue.mjs'], {
+      cwd: runnerRoot,
+      env: {
+        ...process.env,
+        QA_REPORT_DIR: job.reportDir,
+        QA_SCREENSHOT_DIR: job.screenshotDir,
+      },
+    });
     await runCommand(
       process.execPath,
       ['tools/qa_generate_html_report.mjs'],
@@ -339,6 +349,26 @@ async function refreshReportAfterFailure(job) {
   } catch (error) {
     job.lastError = trimOutput(`${job.lastError ?? ''}\nReport refresh after failure failed: ${error instanceof Error ? error.message : String(error)}`);
   }
+}
+
+async function buildDevQueue(job) {
+  const productReview = await readJsonIfExists(join(job.reportDir, 'codex_product_review.json'));
+  const playthroughReview = await readJsonIfExists(join(job.reportDir, 'codex_playthrough_review.json'));
+  if (!productReview || !playthroughReview) {
+    return;
+  }
+  await runProcessStep(job, 'dev queue', 'dev_queue/regression_lock 생성', process.execPath, ['tools/qa_build_dev_queue.mjs'], {
+    cwd: runnerRoot,
+    env: {
+      ...process.env,
+      QA_REPORT_DIR: job.reportDir,
+      QA_SCREENSHOT_DIR: job.screenshotDir,
+      QA_PRODUCT_REVIEW_PATH: join(job.reportDir, 'codex_product_review.json'),
+      QA_PLAYTHROUGH_REVIEW_PATH: join(job.reportDir, 'codex_playthrough_review.json'),
+      QA_DEV_QUEUE_PATH: join(job.reportDir, 'dev_queue.json'),
+      QA_REGRESSION_LOCK_PATH: join(job.reportDir, 'regression_lock.json'),
+    },
+  });
 }
 
 async function runProcessStep(job, phase, message, command, args, options = {}) {
@@ -501,6 +531,8 @@ async function reportViewPayload() {
     lints,
     productReview,
     playthroughReview,
+    devQueue,
+    regressionLock,
     report,
   ] = await Promise.all([
     readJsonIfExists(qaMatrixPath),
@@ -509,6 +541,8 @@ async function reportViewPayload() {
     readJsonIfExists(join(currentReportDir, 'polish_lints.json')),
     readJsonIfExists(join(currentReportDir, 'codex_product_review.json')),
     readJsonIfExists(join(currentReportDir, 'codex_playthrough_review.json')),
+    readJsonIfExists(join(currentReportDir, 'dev_queue.json')),
+    readJsonIfExists(join(currentReportDir, 'regression_lock.json')),
     reportPayload(),
   ]);
   const captureById = new Map((capture?.results ?? []).map((item) => [item.id, item]));
@@ -528,7 +562,10 @@ async function reportViewPayload() {
   const allRows = [...screens, ...flows];
   const summary = {
     fail: allRows.filter((row) => row.verdict === 'FAIL').length,
-    low: allRows.filter((row) => row.verdict === 'LOW_CONFIDENCE').length,
+    blocked: allRows.filter((row) => row.verdict === 'BLOCKED').length,
+    ruleInvalid: allRows.filter((row) => row.verdict === 'RULE_INVALID').length,
+    skip: allRows.filter((row) => row.verdict === 'SKIP').length,
+    lowConfidence: 0,
     pass: allRows.filter((row) => row.verdict === 'PASS').length,
     p0: countSeverity(allRows, 'P0'),
     p1: countSeverity(allRows, 'P1'),
@@ -538,8 +575,12 @@ async function reportViewPayload() {
     evidenceGaps: allRows.reduce((sum, row) => sum + row.evidenceGaps.length, 0),
     forbiddenAbsences: allRows.reduce((sum, row) => sum + row.forbiddenAbsences.length, 0),
     qaFailItems: allRows.reduce((sum, row) => sum + row.qaJudgementItems.filter((item) => item.status === 'FAIL').length, 0),
-    qaLowItems: allRows.reduce((sum, row) => sum + row.qaJudgementItems.filter((item) => item.status === 'LOW_CONFIDENCE').length, 0),
+    qaBlockedItems: allRows.reduce((sum, row) => sum + row.qaJudgementItems.filter((item) => item.status === 'BLOCKED').length, 0),
+    qaRuleInvalidItems: allRows.reduce((sum, row) => sum + row.qaJudgementItems.filter((item) => item.status === 'RULE_INVALID').length, 0),
     qaPassItems: allRows.reduce((sum, row) => sum + row.qaJudgementItems.filter((item) => item.status === 'PASS').length, 0),
+    devQueueItems: (devQueue?.items ?? []).length,
+    qaQueueItems: (devQueue?.qa_queue ?? devQueue?.qa_boost_required ?? []).length,
+    regressionLockFail: (regressionLock?.screens ?? []).filter((screen) => screen.status === 'FAIL').length,
   };
   return {
     generatedAt: new Date().toISOString(),
@@ -550,6 +591,8 @@ async function reportViewPayload() {
       : null,
     liveStatus: withKstTimes(report.liveStatus),
     summary,
+    devQueue: devQueue ?? { items: [], qa_queue: [] },
+    regressionLock: regressionLock ?? { screens: [] },
     screens,
     flows,
   };
@@ -619,6 +662,18 @@ async function refreshCalibrationReport(reportDir) {
       QA_POLISH_LINTS_PATH: join(reportDir, 'polish_lints.json'),
     },
   });
+  await runCommand(process.execPath, ['tools/qa_build_dev_queue.mjs'], {
+    cwd: runnerRoot,
+    env: {
+      ...process.env,
+      QA_REPORT_DIR: reportDir,
+      QA_SCREENSHOT_DIR: screenshotDir,
+      QA_PRODUCT_REVIEW_PATH: join(reportDir, 'codex_product_review.json'),
+      QA_PLAYTHROUGH_REVIEW_PATH: join(reportDir, 'codex_playthrough_review.json'),
+      QA_DEV_QUEUE_PATH: join(reportDir, 'dev_queue.json'),
+      QA_REGRESSION_LOCK_PATH: join(reportDir, 'regression_lock.json'),
+    },
+  });
   await runCommand(process.execPath, ['tools/qa_generate_html_report.mjs'], {
     cwd: runnerRoot,
     env: {
@@ -650,12 +705,14 @@ function buildScreenView(screen, captured, lint, review) {
     contract.failures.length > 0 ||
     p2Plus ||
     (lowestScore !== null && lowestScore < 4);
-  const low =
+  const ruleInvalid = review?.status === 'rule_invalid' || review?.ship_readiness === 'rule_invalid';
+  const blocked =
     lint?.status === 'low_confidence' ||
     review?.status === 'low_confidence' ||
+    review?.status === 'blocked' ||
     review?.ship_readiness === 'evidence_missing' ||
     contract.evidenceGaps.length > 0;
-  const verdict = hardFail ? 'FAIL' : low ? 'LOW_CONFIDENCE' : 'PASS';
+  const verdict = hardFail ? 'FAIL' : ruleInvalid ? 'RULE_INVALID' : blocked ? 'BLOCKED' : 'PASS';
   const qaJudgementItems = ensureQaJudgementItems(buildQaJudgementItems({
     contract,
     lintFindings,
@@ -685,7 +742,8 @@ function buildScreenView(screen, captured, lint, review) {
     scores,
     lowestScore,
     primaryFailure: qaJudgementItems.find((item) => item.status === 'FAIL') ??
-      qaJudgementItems.find((item) => item.status === 'LOW_CONFIDENCE') ??
+      qaJudgementItems.find((item) => item.status === 'BLOCKED') ??
+      qaJudgementItems.find((item) => item.status === 'RULE_INVALID') ??
       null,
     qaJudgementItems,
     qaJudgementSummary: summarizeQaJudgementItems(qaJudgementItems),
@@ -715,8 +773,9 @@ function buildFlowView(flow, review, scoreKeys) {
     contract.failures.length > 0 ||
     p2Plus ||
     (lowestScore !== null && lowestScore < 4);
-  const low = review?.verdict === 'low_confidence' || contract.evidenceGaps.length > 0 || !review;
-  const verdict = hardFail ? 'FAIL' : low ? 'LOW_CONFIDENCE' : 'PASS';
+  const ruleInvalid = review?.verdict === 'rule_invalid';
+  const blocked = review?.verdict === 'low_confidence' || review?.verdict === 'blocked' || contract.evidenceGaps.length > 0 || !review;
+  const verdict = hardFail ? 'FAIL' : ruleInvalid ? 'RULE_INVALID' : blocked ? 'BLOCKED' : 'PASS';
   const qaJudgementItems = ensureQaJudgementItems(buildQaJudgementItems({
     contract,
     reviewFindings: findings,
@@ -743,7 +802,8 @@ function buildFlowView(flow, review, scoreKeys) {
     scores,
     lowestScore,
     primaryFailure: qaJudgementItems.find((item) => item.status === 'FAIL') ??
-      qaJudgementItems.find((item) => item.status === 'LOW_CONFIDENCE') ??
+      qaJudgementItems.find((item) => item.status === 'BLOCKED') ??
+      qaJudgementItems.find((item) => item.status === 'RULE_INVALID') ??
       null,
     qaJudgementItems,
     qaJudgementSummary: summarizeQaJudgementItems(qaJudgementItems),
@@ -828,7 +888,7 @@ function buildQaJudgementItems({
     items.push(contractRowToJudgementItem(row, recommendedFix));
   }
   return dedupeQaJudgementItems(items).sort((a, b) => {
-    const rank = { FAIL: 0, LOW_CONFIDENCE: 1, PASS: 2 };
+    const rank = { FAIL: 0, BLOCKED: 1, RULE_INVALID: 2, PASS: 3, SKIP: 4 };
     const statusDelta = rank[a.status] - rank[b.status];
     if (statusDelta !== 0) return statusDelta;
     return severityRank(b.severity) - severityRank(a.severity);
@@ -837,7 +897,7 @@ function buildQaJudgementItems({
 
 function ensureQaJudgementItems(items, verdict, fallback) {
   if (items.length > 0 || verdict === 'PASS') return items;
-  const status = verdict === 'LOW_CONFIDENCE' ? 'LOW_CONFIDENCE' : 'FAIL';
+  const status = verdict === 'BLOCKED' ? 'BLOCKED' : verdict === 'RULE_INVALID' ? 'RULE_INVALID' : verdict === 'SKIP' ? 'SKIP' : 'FAIL';
   return [{
     key: `fallback:${fallback.targetLabel}`,
     source: 'fallback',
@@ -857,7 +917,7 @@ function contractRowToJudgementItem(row, recommendedFix) {
     key: `contract:${row.category}:${row.id || row.label}`,
     source: 'contract',
     status,
-    severity: status === 'FAIL' ? 'P2' : status === 'LOW_CONFIDENCE' ? 'P3' : '',
+    severity: status === 'FAIL' ? 'P2' : status === 'BLOCKED' ? 'P3' : '',
     criterionId: row.id,
     criterionName: row.label,
     observedEvidence: contractObservedEvidence(row, status),
@@ -868,14 +928,14 @@ function contractRowToJudgementItem(row, recommendedFix) {
 
 function contractJudgementStatus(status) {
   if (status === 'fail' || status === 'forbidden_present') return 'FAIL';
-  if (status === 'evidence_gap') return 'LOW_CONFIDENCE';
+  if (status === 'evidence_gap') return 'BLOCKED';
   return 'PASS';
 }
 
 function contractObservedEvidence(row, status) {
   if (row.note && row.note !== row.label) return row.note;
   if (status === 'FAIL') return `${row.label} 기준이 현재 산출물에서 충족되지 않았습니다.`;
-  if (status === 'LOW_CONFIDENCE') {
+  if (status === 'BLOCKED') {
     return `${row.label} 기준을 판정할 원본 캡처, transcript, 동작 증거가 아직 충분하지 않습니다.`;
   }
   return `${row.label} 기준이 현재 산출물에서 확인됐습니다.`;
@@ -885,14 +945,17 @@ function judgementNextAction(status, recommendedFix, label) {
   if (status === 'FAIL') {
     return recommendedFix || `${label} 기준을 만족하도록 UI/문구/흐름을 수정하세요.`;
   }
-  if (status === 'LOW_CONFIDENCE') {
+  if (status === 'BLOCKED') {
     return `${label} 기준을 판정할 원본 크기 캡처, 상호작용 기록, 또는 한국어 transcript를 추가해 재검수하세요.`;
+  }
+  if (status === 'RULE_INVALID') {
+    return `${label} 기준을 passIf/failIf/blockedIf가 있는 판정 가능한 룰로 다시 작성하세요.`;
   }
   return '추가 조치 없음';
 }
 
 function dedupeQaJudgementItems(items) {
-  const priority = { FAIL: 3, LOW_CONFIDENCE: 2, PASS: 1 };
+  const priority = { FAIL: 5, BLOCKED: 4, RULE_INVALID: 3, PASS: 2, SKIP: 1 };
   const byKey = new Map();
   for (const item of items) {
     const key = item.key || item.criterionId || item.criterionName;
@@ -908,10 +971,12 @@ function summarizeQaJudgementItems(items) {
   return items.reduce((summary, item) => {
     summary.total += 1;
     if (item.status === 'FAIL') summary.fail += 1;
-    else if (item.status === 'LOW_CONFIDENCE') summary.low += 1;
+    else if (item.status === 'BLOCKED') summary.blocked += 1;
+    else if (item.status === 'RULE_INVALID') summary.ruleInvalid += 1;
+    else if (item.status === 'SKIP') summary.skip += 1;
     else summary.pass += 1;
     return summary;
-  }, { total: 0, fail: 0, low: 0, pass: 0 });
+  }, { total: 0, fail: 0, blocked: 0, ruleInvalid: 0, skip: 0, pass: 0 });
 }
 
 function formatContractItem(item) {
@@ -953,7 +1018,7 @@ function contractDisplayStatus(status, item = {}) {
   if (status === 'pass') return 'PASS';
   if (status === 'forbidden_absent') return 'PASS';
   if (status === 'forbidden_present') return 'FAIL';
-  if (status === 'evidence_gap') return 'LOW_CONFIDENCE';
+  if (status === 'evidence_gap') return 'BLOCKED';
   return 'FAIL';
 }
 
@@ -963,9 +1028,9 @@ function contractReason(item) {
   if (item.status === 'present') return `금지 항목이 관찰됐습니다: ${label}`;
   if (item.status === 'not_observed') {
     if (item.category === 'forbidden' || item.category === 'forbiddenFlowBreaks') {
-      return `LOW_CONFIDENCE: ${label} 항목이 없다고 판정할 관찰 근거가 더 필요합니다.`;
+      return `BLOCKED: ${label} 항목이 없다고 판정할 관찰 근거가 더 필요합니다.`;
     }
-    return `LOW_CONFIDENCE: ${label} 기준을 판정할 관찰 근거가 더 필요합니다.`;
+    return `BLOCKED: ${label} 기준을 판정할 관찰 근거가 더 필요합니다.`;
   }
   if (item.status === 'fail') {
     if (item.category === 'implementedEvidence' || item.category === 'observedFlow') {
@@ -1206,7 +1271,7 @@ function dashboardHtml() {
     <section>
       <h2>Report</h2>
       <p class="low">Dashboard 아래에 최신 QA 수정 큐를 카드로 표시합니다. 상세 산출물은 필요할 때만 새 탭으로 크게 열 수 있습니다.</p>
-      <p class="qa-muted">QA 판정 상태: PASS / FAIL / LOW_CONFIDENCE</p>
+      <p class="qa-muted">QA 판정 상태: PASS / FAIL / BLOCKED / RULE_INVALID / SKIP</p>
       <div id="reportSummary" class="grid"></div>
       <div class="actions">
         <a id="reportInlineLink" href="#qaReportHost">수정 큐로 이동</a>
@@ -1347,12 +1412,14 @@ function dashboardHtml() {
     function renderQaView(view) {
       const rows = [...(view.screens || []), ...(view.flows || [])];
       const failRows = rows.filter((row) => row.verdict === 'FAIL');
-      const lowRows = rows.filter((row) => row.verdict === 'LOW_CONFIDENCE');
+      const blockedRows = rows.filter((row) => row.verdict === 'BLOCKED' || row.verdict === 'RULE_INVALID' || row.verdict === 'SKIP');
       const passRows = rows.filter((row) => row.verdict === 'PASS');
       return [
         renderQaSummary(view),
+        renderDevQueueSection('수정 큐', view.devQueue?.items || []),
+        renderDevQueueSection('QA Queue', view.devQueue?.qa_queue || view.devQueue?.qa_boost_required || []),
         renderQaSection('FAIL 수정 큐', failRows, true),
-        renderQaSection('LOW_CONFIDENCE / QA 보강 필요', lowRows, true),
+        renderQaSection('BLOCKED / RULE_INVALID / SKIP', blockedRows, true),
         renderQaSection('PASS 참고', passRows, false),
       ].join('');
     }
@@ -1361,11 +1428,17 @@ function dashboardHtml() {
       const run = view.reportRun || {};
       return '<div class="qa-view-summary">' + [
         ['FAIL', s.fail ?? 0, 'fail'],
-        ['LOW', s.low ?? 0, 'low'],
+        ['BLOCKED', s.blocked ?? 0, (s.blocked ?? 0) > 0 ? 'low' : 'pass'],
+        ['RULE_INVALID', s.ruleInvalid ?? 0, (s.ruleInvalid ?? 0) > 0 ? 'low' : 'pass'],
+        ['LOW_CONFIDENCE', 0, 'pass'],
         ['PASS', s.pass ?? 0, 'pass'],
         ['P0/P1/P2', (s.p0 ?? 0) + '/' + (s.p1 ?? 0) + '/' + (s.p2 ?? 0), ((s.p0 ?? 0) + (s.p1 ?? 0) + (s.p2 ?? 0)) > 0 ? 'fail' : 'pass'],
         ['FAIL 판정 항목', s.qaFailItems ?? 0, (s.qaFailItems ?? 0) > 0 ? 'fail' : 'pass'],
-        ['QA 보강 필요', s.qaLowItems ?? 0, (s.qaLowItems ?? 0) > 0 ? 'low' : 'pass'],
+        ['BLOCKED 판정 항목', s.qaBlockedItems ?? 0, (s.qaBlockedItems ?? 0) > 0 ? 'low' : 'pass'],
+        ['RULE_INVALID 판정 항목', s.qaRuleInvalidItems ?? 0, (s.qaRuleInvalidItems ?? 0) > 0 ? 'low' : 'pass'],
+        ['Dev Queue', s.devQueueItems ?? 0, (s.devQueueItems ?? 0) > 0 ? 'fail' : 'pass'],
+        ['QA Queue', s.qaQueueItems ?? 0, (s.qaQueueItems ?? 0) > 0 ? 'low' : 'pass'],
+        ['Regression Lock FAIL', s.regressionLockFail ?? 0, (s.regressionLockFail ?? 0) > 0 ? 'fail' : 'pass'],
         ['PASS 판정 항목', s.qaPassItems ?? 0, 'pass'],
         ['Report 갱신', view.reportStat?.mtimeKst || '없음', view.reportStat ? 'pass' : 'low'],
         ['Run 관계', run.label || '확인 중', run.isCurrentRunActive ? 'low' : run.reportIsFromCurrentRun ? 'pass' : 'fail'],
@@ -1381,8 +1454,30 @@ function dashboardHtml() {
       }
       return '<details class="qa-details"><summary>' + esc(title) + ' (' + rows.length + ')</summary>' + body + '</details>';
     }
+    function renderDevQueueSection(title, items) {
+      const body = items.length
+        ? '<div class="qa-item-grid">' + items.map(renderDevQueueItem).join('') + '</div>'
+        : '<div class="qa-view-card"><span class="qa-muted">해당 항목 없음</span></div>';
+      return '<section><div class="qa-section-title"><h3>' + esc(title) + '</h3><span class="badge low">' + items.length + '</span></div>' + body + '</section>';
+    }
+    function renderDevQueueItem(item) {
+      const tone = item.status === 'PASS' ? 'pass' : ['BLOCKED', 'RULE_INVALID', 'SKIP'].includes(item.status) ? 'low' : 'fail';
+      const evidence = item.evidence || {};
+      const missing = Array.isArray(item.missing_evidence) && item.missing_evidence.length
+        ? '<div><strong>필요 증거</strong><br>' + esc(item.missing_evidence.join(', ')) + '</div>'
+        : '';
+      return '<article class="qa-item ' + tone + '"><div class="qa-item-main">' +
+        '<div class="qa-item-head"><div><div class="qa-item-title">' + esc(item.id) + '</div><div class="qa-item-state">' + esc(item.target_type + ' · ' + item.target_id) + '</div></div>' + badge(item.status) + '</div>' +
+        '<div class="qa-meta">' + badge(item.severity || '-') + badge(item.category || '-') + '</div>' +
+        '<div class="qa-fix"><strong>검출 근거</strong><br>' + esc(evidence.observed || '') + '</div>' +
+        '<div class="qa-fix"><strong>수정 방향</strong><br>' + esc(item.recommended_fix || '') + '</div>' +
+        '<div class="qa-fix"><strong>통과 기준</strong><br>' + esc(item.pass_condition || '') + '</div>' +
+        missing +
+        '<div class="qa-muted">source: ' + esc(item.source_pointer || '') + '</div>' +
+      '</div></article>';
+    }
     function renderQaItem(row) {
-      const tone = row.verdict === 'PASS' ? 'pass' : row.verdict === 'LOW_CONFIDENCE' ? 'low' : 'fail';
+      const tone = row.verdict === 'PASS' ? 'pass' : ['BLOCKED', 'RULE_INVALID', 'SKIP'].includes(row.verdict) ? 'low' : 'fail';
       const media = row.screenshot
         ? '<a href="' + esc(row.screenshot) + '" target="_blank"><img class="qa-thumb" src="' + esc(row.screenshot) + '" alt="' + esc(row.id) + '"></a>'
         : '<div class="qa-flow-thumb">Playthrough<br>' + esc(row.id) + '</div>';
@@ -1404,7 +1499,8 @@ function dashboardHtml() {
       const s = row.qaJudgementSummary || {};
       return '<div class="qa-block"><strong>QA 판정 요약</strong><div class="qa-contract-summary">' +
         contractPill('FAIL', s.fail ?? 0, (s.fail ?? 0) > 0 ? 'fail' : 'pass') +
-        contractPill('LOW_CONFIDENCE', s.low ?? 0, (s.low ?? 0) > 0 ? 'low' : 'pass') +
+        contractPill('BLOCKED', s.blocked ?? 0, (s.blocked ?? 0) > 0 ? 'low' : 'pass') +
+        contractPill('RULE_INVALID', s.ruleInvalid ?? 0, (s.ruleInvalid ?? 0) > 0 ? 'low' : 'pass') +
         contractPill('PASS', s.pass ?? 0, 'pass') +
         contractPill('전체 기준', s.total ?? 0, 'pass') +
       '</div></div>';
@@ -1429,13 +1525,13 @@ function dashboardHtml() {
       '</ul></details>';
     }
     function renderJudgementCard(item) {
-      const tone = item.status === 'PASS' ? 'pass' : item.status === 'LOW_CONFIDENCE' ? 'low' : 'fail';
+      const tone = item.status === 'PASS' ? 'pass' : ['BLOCKED', 'RULE_INVALID', 'SKIP'].includes(item.status) ? 'low' : 'fail';
       return '<div class="qa-judgement-card ' + tone + '">' + renderJudgementLine(item) + '</div>';
     }
     function renderJudgementLine(item) {
       if (!item || typeof item !== 'object') return esc(item || '');
       const status = item.status || '';
-      const tone = status === 'PASS' ? 'pass' : status === 'LOW_CONFIDENCE' ? 'low' : 'fail';
+      const tone = status === 'PASS' ? 'pass' : ['BLOCKED', 'RULE_INVALID', 'SKIP'].includes(status) ? 'low' : 'fail';
       return '<div class="qa-status-line"><span class="contract-status ' + tone + '">' + esc(status) + '</span><span>' + esc(item.criterionName || item.label || item.message || item.criterionId || '항목') + '</span></div>' +
         '<div class="qa-judgement-fields">' +
           '<div><b>관찰 근거</b> ' + esc(item.observedEvidence || item.reason || '관찰 근거 미기록') + '</div>' +

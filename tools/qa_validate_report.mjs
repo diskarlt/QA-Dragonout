@@ -9,6 +9,11 @@ import {
   scoreKeys,
   severityRank,
 } from './qa_lib.mjs';
+import {
+  REGRESSION_LOCK_SCREEN_IDS,
+  REQUIRED_BASE_STATUS_RULE_IDS,
+  normalizeQaIssue,
+} from './qa_queue_model.mjs';
 
 const reportDir =
   process.env.QA_REPORT_DIR ?? 'docs/qa/reports/2026-05-09-ui-qa-pipeline';
@@ -27,7 +32,13 @@ const calibrationCandidatesPath =
 const calibrationProfilePath =
   process.env.QA_CALIBRATION_PROFILE_PATH ?? join(reportDir, 'qa_calibration_profile.json');
 const fixedRulesPath = process.env.QA_FIXED_RULES_PATH ?? 'tools/qa_fixed_rules.json';
+const devQueuePath = process.env.QA_DEV_QUEUE_PATH ?? join(reportDir, 'dev_queue.json');
+const regressionLockPath =
+  process.env.QA_REGRESSION_LOCK_PATH ?? join(reportDir, 'regression_lock.json');
+const screenArtifactsPath =
+  process.env.QA_SCREEN_ARTIFACTS_PATH ?? join(reportDir, 'screen_artifacts.json');
 const htmlReportPath = process.env.QA_HTML_REPORT_PATH ?? join(reportDir, 'report.html');
+const markdownReportPath = process.env.QA_MARKDOWN_REPORT_PATH ?? join(reportDir, 'report.md');
 const calibrationHtmlPath = process.env.QA_CALIBRATION_HTML_PATH ?? join(reportDir, 'calibration.html');
 const liveStatusPath = process.env.QA_LIVE_STATUS_PATH ?? join(reportDir, 'qa_live_status.json');
 const expectedFinalStatus = process.env.QA_EXPECT_FINAL_STATUS ?? 'pass';
@@ -56,18 +67,30 @@ let calibrationProfile = null;
 let calibrationCandidates = [];
 let fixedRulesDoc = null;
 let fixedRules = [];
+let productReviewDoc = null;
+let playthroughReviewDoc = null;
+let devQueueDoc = null;
+let regressionLockDoc = null;
+let screenArtifactsDoc = null;
+
+const FINAL_ISSUE_STATUSES = new Set(['PASS', 'FAIL', 'BLOCKED', 'RULE_INVALID', 'SKIP']);
+const QA_QUEUE_STATUSES = new Set(['BLOCKED', 'RULE_INVALID', 'SKIP']);
 
 validateMatrix();
 await loadCaptureResult();
 await validateScreenshots();
 await validateCaptureResult();
+await validateScreenArtifacts();
 await validatePolishLints();
 await validateProductReview();
 await validatePlaythroughReview();
 await validateFixedRules();
+await validateDevQueue();
+await validateRegressionLock();
 await validateCalibrationCandidates();
 await validateLiveStatus();
 await validateHtmlReport();
+await validateMarkdownReport();
 
 if (warnings.length > 0) {
   console.warn('QA validation warnings:');
@@ -106,6 +129,24 @@ function validateMatrix() {
     }
     if (!screen.qaCost) {
       errors.push(`qa_matrix ${screen.id} missing qaCost.`);
+    }
+    if (!Array.isArray(screen.facets) || screen.facets.length === 0) {
+      errors.push(`qa_matrix ${screen.id} missing facets.`);
+    }
+    if ((screen.facets ?? []).some((facet) => ['guardian_presence', 'guardian_portrait'].includes(facet))) {
+      if (!Array.isArray(screen.expectedCharacters) || screen.expectedCharacters.length === 0) {
+        errors.push(`qa_matrix ${screen.id} guardian facet requires expectedCharacters.`);
+      }
+    }
+    for (const group of ['expected', 'implementedEvidence', 'forbidden']) {
+      for (const criterion of screen[group] ?? []) {
+        if (!hasRuleCondition(criterion, 'passIf') && !hasRuleCondition(criterion, 'failIf')) {
+          errors.push(`qa_matrix ${screen.id}.${criterion.id} must define passIf or failIf; otherwise it must be emitted as RULE_INVALID.`);
+        }
+        if (isVagueCriterion(criterion.label) && !hasRuleCondition(criterion, 'passIf') && !hasRuleCondition(criterion, 'failIf')) {
+          errors.push(`qa_matrix ${screen.id}.${criterion.id} has vague criterion without explicit passIf/failIf.`);
+        }
+      }
     }
   }
   if (flows.length === 0) {
@@ -190,6 +231,57 @@ async function validateCaptureResult() {
   }
 }
 
+async function validateScreenArtifacts() {
+  if (!(await fileExists(screenArtifactsPath))) {
+    errors.push('screen_artifacts.json is required.');
+    return;
+  }
+  screenArtifactsDoc = await readJson(screenArtifactsPath);
+  const artifacts = Array.isArray(screenArtifactsDoc.artifacts)
+    ? screenArtifactsDoc.artifacts
+    : Array.isArray(screenArtifactsDoc.screens)
+    ? screenArtifactsDoc.screens
+    : Array.isArray(screenArtifactsDoc)
+    ? screenArtifactsDoc
+    : [];
+  if (artifacts.length === 0) {
+    errors.push('screen_artifacts.json must contain artifacts array.');
+    return;
+  }
+  const artifactByScreen = new Map(artifacts.map((artifact) => [artifact.screen, artifact]));
+  for (const screen of requiredScreens) {
+    const artifact = artifactByScreen.get(screen.id);
+    if (!artifact) {
+      errors.push(`screen artifact missing for ${screen.id}.`);
+      continue;
+    }
+    for (const field of ['screen', 'screenshot', 'viewport', 'route', 'visibleText', 'primaryCtas', 'renderedGuardians', 'renderedLocations', 'gameState']) {
+      if (artifact[field] === undefined || artifact[field] === null) {
+        errors.push(`screen artifact ${screen.id} missing ${field}.`);
+      }
+    }
+    if (artifact.screenshot !== screen.screenshot) {
+      errors.push(`screen artifact ${screen.id} screenshot mismatch: ${artifact.screenshot}`);
+    }
+    if (artifact.viewport?.width !== matrix.viewport.width || artifact.viewport?.height !== matrix.viewport.height) {
+      errors.push(`screen artifact ${screen.id} viewport mismatch.`);
+    }
+    for (const arrayField of ['visibleText', 'primaryCtas', 'renderedGuardians', 'renderedLocations']) {
+      if (!Array.isArray(artifact[arrayField])) {
+        errors.push(`screen artifact ${screen.id} ${arrayField} must be an array.`);
+      }
+    }
+    if ((screen.facets ?? []).some((facet) => ['guardian_presence', 'guardian_portrait'].includes(facet))) {
+      if (!Array.isArray(artifact.renderedGuardians)) {
+        errors.push(`screen artifact ${screen.id} guardian facet requires renderedGuardians array.`);
+      }
+      if (!Array.isArray(screen.expectedCharacters) || screen.expectedCharacters.length === 0) {
+        errors.push(`screen artifact ${screen.id} guardian facet requires qa_matrix expectedCharacters.`);
+      }
+    }
+  }
+}
+
 async function validatePolishLints() {
   if (!(await fileExists(polishLintsPath))) {
     errors.push('polish_lints.json is required.');
@@ -232,6 +324,8 @@ async function validateProductReview() {
     return;
   }
   const review = await readJson(productReviewPath);
+  productReviewDoc = review;
+  validateNoLegacyLowConfidence('codex_product_review.json', review);
   if (review.reviewed_by !== 'Codex') {
     errors.push('codex_product_review.json reviewed_by must be Codex.');
   }
@@ -253,12 +347,19 @@ async function validateProductReview() {
     if (result.status === 'fail') {
       validateConcreteFailProductEvidence(screen, result);
     }
+    validateReviewIssues(`codex product review ${screen.id}`, result.qa_issues, {
+      expectedSource: 'product_review',
+      expectedTargetType: 'screen',
+      expectedTargetId: screen.id,
+      expectedStatus: reviewStatusToIssueStatus(result.status),
+    });
+    validateCapturedScreenHasMatrixJudgement(screen, result);
     if (finalPassAllowed && result.status === 'pass') {
       validateConcreteProductEvidence(screen, result);
     }
     const contract = validateScreenContract(screen, result);
-    if (result.status === 'low_confidence' && contract.notObserved.length === 0) {
-      errors.push(`LOW_CONFIDENCE for ${screen.id} requires not_observed contract evidence.`);
+    if (result.status === 'low_confidence') {
+      errors.push(`codex product review ${screen.id} must not use final low_confidence status; use BLOCKED.`);
     }
     if (finalPassAllowed && result.status !== 'pass') {
       errors.push(`codex product review not pass for ${screen.id}: ${result.status}`);
@@ -320,6 +421,8 @@ async function validatePlaythroughReview() {
     return;
   }
   const review = await readJson(playthroughReviewPath);
+  playthroughReviewDoc = review;
+  validateNoLegacyLowConfidence('codex_playthrough_review.json', review);
   if (review.reviewed_by !== 'Codex') {
     errors.push('codex_playthrough_review.json reviewed_by must be Codex.');
   }
@@ -343,7 +446,7 @@ async function validatePlaythroughReview() {
       errors.push(`codex playthrough review ${flow.id} missing review_note.`);
     } else if (result.verdict === 'fail') {
       validateConcreteText(`codex playthrough review ${flow.id} review_note`, result.review_note);
-    } else if (finalPassAllowed && result.verdict === 'pass') {
+    } else if (result.verdict === 'pass') {
       validateConcreteText(`codex playthrough review ${flow.id} review_note`, result.review_note);
     }
     if (!Array.isArray(result.requiredEvidence) || result.requiredEvidence.length === 0) {
@@ -353,23 +456,29 @@ async function validatePlaythroughReview() {
       errors.push(`codex playthrough review ${flow.id} missing transcript.`);
     } else if (result.verdict === 'fail') {
       validateTranscript(flow.id, result.transcript);
-    } else if (finalPassAllowed && result.verdict === 'pass') {
+    } else if (result.verdict === 'pass') {
       validateTranscript(flow.id, result.transcript);
     }
     if (isBlank(result.recommended_fix)) {
       errors.push(`codex playthrough review ${flow.id} missing recommended_fix.`);
     } else if (result.verdict === 'fail') {
       validateConcreteText(`codex playthrough review ${flow.id} recommended_fix`, result.recommended_fix);
-    } else if (finalPassAllowed && result.verdict === 'pass') {
+    } else if (result.verdict === 'pass') {
       validateConcreteText(`codex playthrough review ${flow.id} recommended_fix`, result.recommended_fix);
     }
     validatePlaythroughReviewNoMeta(flow.id, result);
     if (result.verdict === 'fail') {
       validateConcreteFailPlaythroughEvidence(flow.id, result);
     }
+    validateReviewIssues(`codex playthrough review ${flow.id}`, result.qa_issues, {
+      expectedSource: 'playthrough_review',
+      expectedTargetType: 'flow',
+      expectedTargetId: flow.id,
+      expectedStatus: reviewStatusToIssueStatus(result.verdict),
+    });
     const contract = validateFlowContract(flow.id, result);
-    if (result.verdict === 'low_confidence' && contract.notObserved.length === 0) {
-      errors.push(`LOW_CONFIDENCE for playthrough ${flow.id} requires not_observed contract evidence.`);
+    if (result.verdict === 'low_confidence') {
+      errors.push(`codex playthrough review ${flow.id} must not use final low_confidence verdict; use BLOCKED.`);
     }
     if (finalPassAllowed && result.verdict !== 'pass') {
       errors.push(`codex playthrough review not pass for ${flow.id}: ${result.verdict}`);
@@ -530,12 +639,16 @@ async function validateCalibrationQueuePromotion() {
   if (fixedRuleModeActive) {
     for (const rule of fixedRules) {
       const findings = findingsForRule(rule, { productById, flowById, globalFindings });
-      if (findings.length === 0) {
+      const qaIssues = qaIssuesForRule(rule, { productById, flowById, productReview });
+      if (findings.length === 0 && qaIssues.length === 0) {
         errors.push(`fixed QA rule missing finding: ${rule.rule_id}`);
         continue;
       }
       for (const finding of findings) {
         validateFixedRuleFinding(`fixed QA rule finding ${rule.rule_id}`, finding);
+      }
+      for (const issue of qaIssues) {
+        validateQaIssue(`fixed QA rule issue ${rule.rule_id}`, normalizeQaIssue(issue), { queueItem: false });
       }
     }
   }
@@ -599,7 +712,7 @@ async function validateFixedRules() {
       errors.push(`duplicate fixed QA rule id: ${rule.rule_id}`);
     }
     ids.add(rule.rule_id);
-    if (!/^[-a-z0-9_]+$/.test(rule.rule_id ?? '')) {
+    if (!/^[-a-z0-9_.]+$/.test(rule.rule_id ?? '')) {
       errors.push(`fixed QA rule id must be snake_case-like: ${rule.rule_id}`);
     }
     if (!['screen_problem', 'play_experience', 'global_visual'].includes(rule.type)) {
@@ -618,13 +731,116 @@ async function validateFixedRules() {
       .map((rule) => rule.rule_id),
   );
   for (const ruleId of [
+    'guardian_presence_exact',
     'guardian_portrait_scale_consistency',
     'guardian_portrait_no_crop',
-    'guardian_live2d_layered_motion',
+    'guardian_motion.pseudo_live2d_presence',
     'cta_ssot_contract',
   ]) {
     if (!calS02Rules.has(ruleId)) {
       errors.push(`CAL-S02 fixed QA rule missing: ${ruleId}`);
+    }
+  }
+}
+
+async function validateDevQueue() {
+  if (!(await fileExists(devQueuePath))) {
+    errors.push('dev_queue.json is required.');
+    return;
+  }
+  devQueueDoc = await readJson(devQueuePath);
+  validateNoLegacyLowConfidence('dev_queue.json', devQueueDoc);
+  if (!Array.isArray(devQueueDoc.items)) {
+    errors.push('dev_queue.json must contain items array.');
+    return;
+  }
+  if (!Array.isArray(devQueueDoc.qa_queue)) {
+    errors.push('dev_queue.json must contain qa_queue array.');
+  }
+  if (finalPassAllowed && devQueueDoc.items.length > 0) {
+    errors.push(`final PASS requires empty dev_queue.json items, got ${devQueueDoc.items.length}.`);
+  }
+  if (finalPassAllowed && (devQueueDoc.qa_queue ?? []).length > 0) {
+    errors.push(`final PASS requires empty qa_queue, got ${devQueueDoc.qa_queue.length}.`);
+  }
+  const sourceIssues = sourceIssueMap();
+  const ids = new Set();
+  for (const rawItem of devQueueDoc.items) {
+    const item = normalizeQaIssue(rawItem);
+    validateQaIssue(`dev_queue item ${item.id}`, item, { queueItem: true });
+    if (item.status !== 'FAIL') {
+      errors.push(`dev_queue item ${item.id} must be FAIL, got ${item.status}.`);
+    }
+    if (ids.has(item.id)) {
+      errors.push(`duplicate dev_queue item id: ${item.id}`);
+    }
+    ids.add(item.id);
+    if (isBlank(item.source_pointer)) {
+      errors.push(`dev_queue item ${item.id} missing source_pointer.`);
+    } else if (!sourceIssues.has(item.source_pointer) && !regressionSourcePointerExists(item.source_pointer)) {
+      errors.push(`dev_queue item ${item.id} source_pointer does not match source issue: ${item.source_pointer}`);
+    }
+  }
+  for (const rawItem of devQueueDoc.qa_queue ?? []) {
+    const item = normalizeQaIssue(rawItem);
+    validateQaIssue(`qa_queue item ${item.id}`, item, { queueItem: false });
+    if (!QA_QUEUE_STATUSES.has(item.status)) {
+      errors.push(`qa_queue item ${item.id} must be BLOCKED/RULE_INVALID/SKIP, got ${item.status}.`);
+    }
+  }
+  for (const rawItem of devQueueDoc.qa_boost_required ?? []) {
+    const item = normalizeQaIssue(rawItem);
+    if (item.status === 'FAIL') {
+      errors.push(`qa_boost_required compatibility item ${item.id} must not be FAIL.`);
+    }
+  }
+}
+
+async function validateRegressionLock() {
+  if (!(await fileExists(regressionLockPath))) {
+    errors.push('regression_lock.json is required.');
+    return;
+  }
+  regressionLockDoc = await readJson(regressionLockPath);
+  validateNoLegacyLowConfidence('regression_lock.json', regressionLockDoc);
+  if (!Array.isArray(regressionLockDoc.screens)) {
+    errors.push('regression_lock.json must contain screens array.');
+    return;
+  }
+  const screenById = new Map(regressionLockDoc.screens.map((screen) => [screen.id, screen]));
+  const queueIds = new Set((devQueueDoc?.items ?? []).map((item) => item.id));
+  for (const screenId of REGRESSION_LOCK_SCREEN_IDS) {
+    const screen = screenById.get(screenId);
+    if (!screen) {
+      errors.push(`regression_lock missing required screen: ${screenId}`);
+      continue;
+    }
+    if (!['PASS', 'FAIL', 'BLOCKED', 'RULE_INVALID', 'SKIP'].includes(screen.status)) {
+      errors.push(`regression_lock ${screenId} invalid status: ${screen.status}`);
+    }
+    if (finalPassAllowed && screen.status !== 'PASS') {
+      errors.push(`final PASS requires regression_lock ${screenId}=PASS, got ${screen.status}.`);
+    }
+    if (isBlank(screen.screenshot)) {
+      errors.push(`regression_lock ${screenId} missing screenshot.`);
+    }
+    if (!Array.isArray(screen.checks) || screen.checks.length === 0) {
+      errors.push(`regression_lock ${screenId} missing checks.`);
+    }
+    for (const check of screen.checks ?? []) {
+      if (isBlank(check.id) || isBlank(check.status) || isBlank(check.evidence) || isBlank(check.pass_condition)) {
+        errors.push(`regression_lock ${screenId} has incomplete check.`);
+      }
+      if (check.status === 'FAIL' && !queueIds.has(check.dev_queue_item_id)) {
+        errors.push(`regression_lock ${screenId} FAIL check missing dev_queue link: ${check.id}`);
+      }
+    }
+  }
+  const baseStatus = screenById.get('base_status');
+  const baseRuleIds = new Set((baseStatus?.checks ?? []).map((check) => check.id));
+  for (const ruleId of REQUIRED_BASE_STATUS_RULE_IDS) {
+    if (!baseRuleIds.has(ruleId)) {
+      errors.push(`regression_lock base_status missing CAL-S02 rule: ${ruleId}`);
     }
   }
 }
@@ -638,6 +854,19 @@ function findingsForRule(rule, { productById, flowById, globalFindings }) {
   }
   if (rule.type === 'global_visual') {
     return (globalFindings ?? []).filter((finding) => finding.rule_id === rule.rule_id);
+  }
+  return [];
+}
+
+function qaIssuesForRule(rule, { productById, flowById, productReview }) {
+  if (rule.type === 'screen_problem') {
+    return (productById.get(rule.target_id)?.qa_issues ?? []).filter((issue) => issue.rule_id === rule.rule_id);
+  }
+  if (rule.type === 'play_experience') {
+    return (flowById.get(rule.target_id)?.qa_issues ?? []).filter((issue) => issue.rule_id === rule.rule_id);
+  }
+  if (rule.type === 'global_visual') {
+    return (productReview.qa_issues ?? []).filter((issue) => issue.rule_id === rule.rule_id);
   }
   return [];
 }
@@ -684,7 +913,12 @@ async function validateHtmlReport() {
   if (automatedGateBlocksCodex && !finalPassAllowed) {
     requiredTexts.push('자동 검사 FAIL', 'Codex 제품 검수 미진입');
   }
-  requiredTexts.push('고정 QA 룰', 'QA 판정 항목', '전체 QA 판정 항목', 'qa-matrix-grid', 'qa-card');
+  requiredTexts.push('고정 QA 룰', 'QA 판정 항목', '전체 QA 판정 항목', 'QA Queue', 'LOW_CONFIDENCE', 'Regression Lock', 'qa-matrix-grid', 'qa-card');
+  for (const item of devQueueDoc?.items ?? []) {
+    if (!html.includes(item.id)) {
+      errors.push(`report.html missing dev_queue item: ${item.id}`);
+    }
+  }
   for (const requiredText of requiredTexts) {
     if (!html.includes(requiredText)) {
       errors.push(`report.html missing required text: ${requiredText}`);
@@ -695,7 +929,20 @@ async function validateHtmlReport() {
       errors.push(`report.html must not expose calibration setup UI: ${forbiddenText}`);
     }
   }
-  for (const forbiddenText of ['<th>계약 위반</th>', '계약 위반 없음', '실패와 증거 부족 없이', '기대 항목 미충족', '구현 증거 부족']) {
+  for (const forbiddenText of [
+    '<span class="badge low">LOW_CONFIDENCE</span>',
+    '<span class="contract-badge low">LOW_CONFIDENCE</span>',
+    '<th>계약 위반</th>',
+    '계약 위반 없음',
+    '실패와 증거 부족 없이',
+    '기대 항목 미충족',
+    '구현 증거 부족',
+    'calibration_not_started',
+    '캘리브레이션 미시작',
+    '고정 룰 finding이 없어',
+    '고정 QA 룰 finding이 없으므로',
+    '다음 캘리브레이션 라운드',
+  ]) {
     if (html.includes(forbiddenText)) {
       errors.push(`report.html must not expose generic QA judgement text: ${forbiddenText}`);
     }
@@ -708,9 +955,10 @@ async function validateHtmlReport() {
       }
     }
     for (const ruleId of [
+      'guardian_presence_exact',
       'guardian_portrait_scale_consistency',
       'guardian_portrait_no_crop',
-      'guardian_live2d_layered_motion',
+      'guardian_motion.pseudo_live2d_presence',
       'cta_ssot_contract',
     ]) {
       if (!html.includes(ruleId)) {
@@ -724,6 +972,24 @@ async function validateHtmlReport() {
     }
   }
   await validateCalibrationSetupHtml();
+}
+
+async function validateMarkdownReport() {
+  if (!(await fileExists(markdownReportPath))) {
+    errors.push('report.md is required.');
+    return;
+  }
+  const markdown = await readFile(markdownReportPath, 'utf8');
+  for (const requiredText of ['# Dragonout QA Report', '## 수정 큐', '## QA Queue', 'LOW_CONFIDENCE: 0', '## Regression Lock']) {
+    if (!markdown.includes(requiredText)) {
+      errors.push(`report.md missing required text: ${requiredText}`);
+    }
+  }
+  for (const item of devQueueDoc?.items ?? []) {
+    if (!markdown.includes(item.id)) {
+      errors.push(`report.md missing dev_queue item: ${item.id}`);
+    }
+  }
 }
 
 async function hasFixedRuleModeActive() {
@@ -748,9 +1014,10 @@ async function validateCalibrationSetupHtml() {
     }
   }
   for (const ruleId of [
+    'guardian_presence_exact',
     'guardian_portrait_scale_consistency',
     'guardian_portrait_no_crop',
-    'guardian_live2d_layered_motion',
+    'guardian_motion.pseudo_live2d_presence',
     'cta_ssot_contract',
   ]) {
     if (!html.includes(ruleId)) {
@@ -787,6 +1054,151 @@ function validateReviewEvidence(label, id, result, screen) {
   }
 }
 
+function validateReviewIssues(label, rawIssues, options) {
+  if (!Array.isArray(rawIssues) || rawIssues.length === 0) {
+    errors.push(`${label} missing qa_issues.`);
+    return;
+  }
+  validateNoLegacyLowConfidence(`${label} qa_issues`, rawIssues);
+  const issues = rawIssues.map((issue) => normalizeQaIssue(issue, {
+    source: options.expectedSource,
+    target_type: options.expectedTargetType,
+    target_id: options.expectedTargetId,
+  }));
+  const statuses = new Set(issues.map((issue) => issue.status));
+  if (!statuses.has(options.expectedStatus)) {
+    errors.push(`${label} qa_issues missing expected status ${options.expectedStatus}.`);
+  }
+  for (const issue of issues) {
+    validateQaIssue(`${label} qa_issue ${issue.id}`, issue, { queueItem: false });
+    if (issue.source !== options.expectedSource) {
+      errors.push(`${label} qa_issue ${issue.id} source mismatch: ${issue.source}`);
+    }
+    if (issue.target_type !== options.expectedTargetType) {
+      errors.push(`${label} qa_issue ${issue.id} target_type mismatch: ${issue.target_type}`);
+    }
+    if (issue.target_id !== options.expectedTargetId) {
+      errors.push(`${label} qa_issue ${issue.id} target_id mismatch: ${issue.target_id}`);
+    }
+  }
+}
+
+function validateQaIssue(label, issue, options = {}) {
+  for (const field of ['id', 'source', 'target_type', 'target_id', 'status', 'severity', 'category', 'expected']) {
+    if (isBlank(issue[field])) {
+      errors.push(`${label} missing ${field}.`);
+    }
+  }
+  if (!FINAL_ISSUE_STATUSES.has(issue.status)) {
+    errors.push(`${label} invalid status: ${issue.status}`);
+  }
+  if (!['P0', 'P1', 'P2', 'P3'].includes(issue.severity)) {
+    errors.push(`${label} invalid severity: ${issue.severity}`);
+  }
+  if (isBlank(issue.evidence?.observed)) {
+    errors.push(`${label} missing evidence.observed.`);
+  } else {
+    validateConcreteText(`${label} evidence.observed`, issue.evidence.observed);
+  }
+  validateConcreteText(`${label} expected`, issue.expected);
+  if (issue.status === 'FAIL') {
+    if (isBlank(issue.recommended_fix)) {
+      errors.push(`${label} FAIL missing recommended_fix.`);
+    } else {
+      validateConcreteText(`${label} recommended_fix`, issue.recommended_fix);
+    }
+    if (isBlank(issue.pass_condition)) {
+      errors.push(`${label} FAIL missing pass_condition.`);
+    } else {
+      validateConcreteText(`${label} pass_condition`, issue.pass_condition);
+    }
+    if (isBlank(issue.evidence_pointer) && isBlank(issue.source_pointer)) {
+      errors.push(`${label} FAIL missing evidence_pointer/source_pointer.`);
+    }
+    validateFailIssueHasObservedDefect(label, issue);
+  }
+  if (issue.status === 'PASS') {
+    if (isBlank(issue.pass_evidence) && isBlank(issue.concrete_observed_evidence) && isBlank(issue.evidence?.observed)) {
+      errors.push(`${label} PASS missing pass_evidence/concrete_observed_evidence.`);
+    } else {
+      validateConcreteText(`${label} pass_evidence`, issue.pass_evidence ?? issue.concrete_observed_evidence ?? issue.evidence?.observed);
+    }
+  }
+  if (issue.status === 'BLOCKED') {
+    if (!Array.isArray(issue.missing_evidence) || issue.missing_evidence.length === 0) {
+      errors.push(`${label} BLOCKED missing missing_evidence.`);
+    }
+    if (isBlank(issue.blocked_reason)) {
+      errors.push(`${label} BLOCKED missing blocked_reason.`);
+    } else {
+      validateConcreteText(`${label} blocked_reason`, issue.blocked_reason);
+    }
+    if (isBlank(issue.required_artifact)) {
+      errors.push(`${label} BLOCKED missing required_artifact.`);
+    }
+    if (options.queueItem) {
+      errors.push(`${label} BLOCKED cannot enter dev_queue.`);
+    }
+  }
+  if (issue.status === 'RULE_INVALID') {
+    if (isBlank(issue.invalid_reason)) {
+      errors.push(`${label} RULE_INVALID missing invalid_reason.`);
+    } else {
+      validateConcreteText(`${label} invalid_reason`, issue.invalid_reason);
+    }
+    if (isBlank(issue.rewritten_rule_suggestion)) {
+      errors.push(`${label} RULE_INVALID missing rewritten_rule_suggestion.`);
+    } else {
+      validateConcreteText(`${label} rewritten_rule_suggestion`, issue.rewritten_rule_suggestion);
+    }
+    if (options.queueItem) {
+      errors.push(`${label} RULE_INVALID cannot enter dev_queue.`);
+    }
+  }
+  if (issue.status === 'SKIP' && options.queueItem) {
+    errors.push(`${label} SKIP cannot enter dev_queue.`);
+  }
+  validateMotionIssueEvidence(label, issue);
+  for (const [field, value] of [
+    ['evidence.observed', issue.evidence?.observed],
+    ['expected', issue.expected],
+    ['recommended_fix', issue.recommended_fix],
+    ['pass_condition', issue.pass_condition],
+    ['pass_evidence', issue.pass_evidence],
+    ['blocked_reason', issue.blocked_reason],
+    ['invalid_reason', issue.invalid_reason],
+    ['rewritten_rule_suggestion', issue.rewritten_rule_suggestion],
+  ]) {
+    if (!isBlank(value) && isMetaFailureText(value)) {
+      errors.push(`${label} ${field} contains meta failure text.`);
+    }
+  }
+}
+
+function validateFailIssueHasObservedDefect(label, issue) {
+  for (const [field, value] of [
+    ['evidence.observed', issue.evidence?.observed],
+    ['recommended_fix', issue.recommended_fix],
+    ['pass_condition', issue.pass_condition],
+  ]) {
+    if (!isBlank(value) && isEvidenceGapDisguisedAsFail(value)) {
+      errors.push(`${label} ${field} uses evidence gap wording as FAIL.`);
+    }
+  }
+}
+
+function isEvidenceGapDisguisedAsFail(value) {
+  const text = String(value ?? '').replace(/\s+/g, ' ').trim();
+  return [
+    /위험을 제거했다는 관찰 근거가 부족/,
+    /PASS 근거로 확인할 수 없어 .*티켓/,
+    /검토 항목을 PASS 근거로 확인할 수 없어/,
+    /기준을 충분히 드러내지 못해 현재 화면군 QA Matrix에서 FAIL/,
+    /관찰 근거가 부족해 .*회귀 티켓/,
+    /부재 확인 근거가 부족해 .*FAIL/,
+  ].some((pattern) => pattern.test(text));
+}
+
 function validateConcreteProductEvidence(screen, result) {
   const screenshotName = screen.screenshot;
   const combinedReviewText = [
@@ -813,8 +1225,9 @@ function validateConcreteFailProductEvidence(screen, result) {
   const severe = (result.findings ?? []).filter(
     (finding) => severityRank(finding.severity) >= severityRank('P2'),
   );
-  if (severe.length === 0) {
-    errors.push(`codex product review ${screen.id} FAIL requires at least one P2+ concrete finding.`);
+  const failIssues = (result.qa_issues ?? []).filter((issue) => normalizeQaIssue(issue).status === 'FAIL');
+  if (severe.length === 0 && failIssues.length === 0) {
+    errors.push(`codex product review ${screen.id} FAIL requires at least one concrete FAIL issue or P2+ finding.`);
   }
   for (const finding of severe) {
     validateConcreteText(`codex product review ${screen.id} finding ${finding.code}`, finding.message);
@@ -826,12 +1239,29 @@ function validateConcreteFailPlaythroughEvidence(id, result) {
   const severe = (result.findings ?? []).filter(
     (finding) => severityRank(finding.severity) >= severityRank('P2'),
   );
-  if (severe.length === 0) {
-    errors.push(`codex playthrough review ${id} FAIL requires at least one P2+ concrete finding.`);
+  const failIssues = (result.qa_issues ?? []).filter((issue) => normalizeQaIssue(issue).status === 'FAIL');
+  if (severe.length === 0 && failIssues.length === 0) {
+    errors.push(`codex playthrough review ${id} FAIL requires at least one concrete FAIL issue or P2+ finding.`);
   }
   for (const finding of severe) {
     validateConcreteText(`codex playthrough review ${id} finding ${finding.code}`, finding.message);
     validateFixedRuleFinding(`codex playthrough review ${id} finding ${finding.code}`, finding);
+  }
+}
+
+function validateCapturedScreenHasMatrixJudgement(screen, result) {
+  if (!isCapturedScreen(screen.id)) return;
+  const issues = (result.qa_issues ?? []).map((issue) => normalizeQaIssue(issue, {
+    source: 'product_review',
+    target_type: 'screen',
+    target_id: screen.id,
+  }));
+  if (
+    issues.length === 1 &&
+    issues[0].status === 'BLOCKED' &&
+    issues[0].id === `${screen.id}.qa_evidence_incomplete`
+  ) {
+    errors.push(`captured screen ${screen.id} cannot use qa_evidence_incomplete as its only QA issue.`);
   }
 }
 
@@ -841,7 +1271,7 @@ function validateFixedRuleFinding(label, finding) {
       errors.push(`${label} missing fixed rule field ${field}.`);
     }
   }
-  if (!isBlank(finding.rule_id) && !/^[-a-z0-9_]+$/.test(finding.rule_id)) {
+  if (!isBlank(finding.rule_id) && !/^[-a-z0-9_.]+$/.test(finding.rule_id)) {
     errors.push(`${label} rule_id must be snake_case-like: ${finding.rule_id}`);
   }
   if (!isBlank(finding.observed_evidence)) {
@@ -866,7 +1296,7 @@ function validateCandidateLearnedRules(candidate, status) {
         validateConcreteText(`learned QA rule ${candidate.candidate_id} ${field}`, rule[field]);
       }
     }
-    if (!/^[-a-z0-9_]+$/.test(rule.rule_id ?? '')) {
+    if (!/^[-a-z0-9_.]+$/.test(rule.rule_id ?? '')) {
       errors.push(`learned QA rule id must be snake_case-like for ${candidate.candidate_id}: ${rule.rule_id}`);
     }
   }
@@ -1065,6 +1495,12 @@ function isMetaFailureText(value) {
     /codex_product_score_below_bar/,
     /ship_readiness_needs_polish/,
     /ship_readiness_prototype_quality/,
+    /calibration_not_started/,
+    /캘리브레이션 미시작/,
+    /첫 캘리브레이션 라운드 대상/,
+    /다음 캘리브레이션 라운드/,
+    /고정 룰 finding이 없어/,
+    /고정 QA 룰 finding이 없으므로/,
     /screenshot reviewed/i,
   ];
   return metaPatterns.some((pattern) => pattern.test(normalized));
@@ -1128,8 +1564,116 @@ function normalizeCalibrationProfile(value) {
   };
 }
 
+function reviewStatusToIssueStatus(status) {
+  const normalized = String(status ?? '').trim().toLowerCase();
+  if (normalized === 'pass') return 'PASS';
+  if (normalized === 'blocked' || normalized === 'low_confidence') return 'BLOCKED';
+  if (normalized === 'rule_invalid') return 'RULE_INVALID';
+  if (normalized === 'skip' || normalized === 'skipped') return 'SKIP';
+  return 'FAIL';
+}
+
+function validateNoLegacyLowConfidence(label, value) {
+  const text = JSON.stringify(value);
+  if (/"status"\s*:\s*"LOW_CONFIDENCE"/i.test(text) || /"status"\s*:\s*"low_confidence"/i.test(text)) {
+    errors.push(`${label} must not contain final LOW_CONFIDENCE status; use BLOCKED/RULE_INVALID/SKIP.`);
+  }
+  if (/"verdict"\s*:\s*"low_confidence"/i.test(text)) {
+    errors.push(`${label} must not contain final low_confidence verdict; use BLOCKED.`);
+  }
+}
+
+function hasRuleCondition(criterion, field) {
+  const value = criterion?.[field];
+  if (Array.isArray(value)) return value.some((item) => !isBlank(item));
+  return !isBlank(value);
+}
+
+function isVagueCriterion(value) {
+  const text = String(value ?? '').trim().toLowerCase();
+  const normalized = text.replace(/\s+/g, ' ');
+  const vague = [
+    /^확인한다\.?$/,
+    /^보인다\.?$/,
+    /^읽힌다\.?$/,
+    /^느껴진다\.?$/,
+    /^review$/,
+    /^clear$/,
+    /^readable$/,
+  ];
+  return vague.some((pattern) => pattern.test(normalized));
+}
+
+function validateMotionIssueEvidence(label, issue) {
+  const id = `${issue.id} ${issue.rule_id ?? ''} ${issue.category ?? ''}`.toLowerCase();
+  const isMotion = id.includes('motion') || id.includes('live2d');
+  if (!isMotion) return;
+  const requiredArtifact = Array.isArray(issue.required_artifact)
+    ? issue.required_artifact.join(' ')
+    : String(issue.required_artifact ?? '');
+  const evidencePointer = `${issue.evidence_pointer ?? ''} ${issue.source_pointer ?? ''} ${requiredArtifact}`.toLowerCase();
+  const hasMotionEvidence = /video_2s|3_timestamp|timestamp_frames|motion_capture/.test(evidencePointer);
+  if ((issue.status === 'PASS' || issue.status === 'FAIL') && !hasMotionEvidence) {
+    errors.push(`${label} cannot classify motion/live2d as ${issue.status} from screenshot-only evidence.`);
+  }
+}
+
 function hasP2Plus(findings) {
   return (findings ?? []).some((finding) => severityRank(finding.severity) >= severityRank('P2'));
+}
+
+function sourceIssueMap() {
+  const map = new Map();
+  for (const screen of productReviewDoc?.screens ?? []) {
+    for (const rawIssue of screen.qa_issues ?? []) {
+      const issue = normalizeQaIssue(rawIssue, {
+        source: 'product_review',
+        target_type: 'screen',
+        target_id: screen.id,
+      });
+      if (issue.source_pointer) map.set(issue.source_pointer, issue);
+      map.set(`product_review:${screen.id}:${issue.id}`, issue);
+      map.set(`product_review:${screen.id}:${screen.id}:${issue.id}`, issue);
+      map.set(`codex_product_review.json:screens:${screen.id}:${issue.rule_id ?? issue.id.split('.').at(-1)}`, issue);
+    }
+  }
+  for (const rawIssue of productReviewDoc?.qa_issues ?? []) {
+    const issue = normalizeQaIssue(rawIssue, {
+      source: 'product_review',
+      target_type: 'global',
+      target_id: rawIssue.target_id,
+    });
+    if (issue.source_pointer) map.set(issue.source_pointer, issue);
+    map.set(`product_review:global:${issue.id}`, issue);
+    map.set(`product_review:global:${issue.target_id}:${issue.id}`, issue);
+    map.set(`codex_product_review.json:global:${issue.rule_id ?? issue.id.split('.').at(-1)}`, issue);
+  }
+  for (const flow of playthroughReviewDoc?.flows ?? []) {
+    for (const rawIssue of flow.qa_issues ?? []) {
+      const issue = normalizeQaIssue(rawIssue, {
+        source: 'playthrough_review',
+        target_type: 'flow',
+        target_id: flow.flow_id,
+      });
+      if (issue.source_pointer) map.set(issue.source_pointer, issue);
+      map.set(`playthrough_review:${flow.flow_id}:${issue.id}`, issue);
+      map.set(`playthrough_review:${flow.flow_id}:${flow.flow_id}:${issue.id}`, issue);
+      map.set(`codex_playthrough_review.json:flows:${flow.flow_id}:${issue.rule_id ?? issue.id.split('.').at(-1)}`, issue);
+    }
+  }
+  return map;
+}
+
+function regressionSourcePointerExists(pointer) {
+  if (!regressionLockDoc || !String(pointer).startsWith('regression_lock')) return false;
+  return (regressionLockDoc.screens ?? []).some((screen) =>
+    (screen.checks ?? []).some((check) => String(pointer).includes(screen.id) && String(pointer).includes(check.id)),
+  );
+}
+
+function isCapturedScreen(screenId) {
+  const row = (capture?.results ?? []).find((result) => result.id === screenId);
+  return ['captured', 'skipped_cached'].includes(row?.status);
 }
 
 function arraySet(value) {

@@ -21,9 +21,13 @@ const calibrationCandidatesPath =
 const calibrationProfilePath =
   process.env.QA_CALIBRATION_PROFILE_PATH ?? join(reportDir, 'qa_calibration_profile.json');
 const fixedRulesPath = process.env.QA_FIXED_RULES_PATH ?? 'tools/qa_fixed_rules.json';
+const devQueuePath = process.env.QA_DEV_QUEUE_PATH ?? join(reportDir, 'dev_queue.json');
+const regressionLockPath =
+  process.env.QA_REGRESSION_LOCK_PATH ?? join(reportDir, 'regression_lock.json');
 const liveStatusPath = process.env.QA_LIVE_STATUS_PATH ?? join(reportDir, 'qa_live_status.json');
 const templatePath = process.env.QA_REPORT_TEMPLATE_PATH ?? 'tools/qa_report_template.html';
 const outputPath = process.env.QA_HTML_REPORT_PATH ?? join(reportDir, 'report.html');
+const markdownOutputPath = process.env.QA_MARKDOWN_REPORT_PATH ?? join(reportDir, 'report.md');
 const calibrationOutputPath = process.env.QA_CALIBRATION_HTML_PATH ?? join(reportDir, 'calibration.html');
 const qaMode = process.env.QA_MODE ?? 'full';
 const dashboardUrl = process.env.QA_DASHBOARD_URL ?? 'http://127.0.0.1:64700';
@@ -71,6 +75,16 @@ const fixedRulesDoc = await readJsonOrDefault(fixedRulesPath, {
   version: 1,
   rules: [],
 });
+const devQueueDoc = await readJsonOrDefault(devQueuePath, {
+  generated_at: null,
+  items: [],
+  qa_queue: [],
+  qa_boost_required: [],
+});
+const regressionLockDoc = await readJsonOrDefault(regressionLockPath, {
+  generated_at: null,
+  screens: [],
+});
 const liveStatus = (await fileExists(liveStatusPath))
   ? await readJson(liveStatusPath)
   : {
@@ -112,12 +126,27 @@ const severityCounts = countSeverity([...screenRows, ...flowRows]);
 const contractCounts = countContractFindings(screenRows, flowRows);
 const fixedRules = normalizeFixedRules(fixedRulesDoc);
 const fixedRuleQueue = collectFixedRuleQueue();
+const devQueueItems = normalizeDevQueueItems(devQueueDoc.items ?? []);
+const qaQueueItems = normalizeDevQueueItems(
+  devQueueDoc.qa_queue ?? devQueueDoc.qa_boost_required ?? [],
+);
+const qaQueueGroups = groupQaQueueItems(qaQueueItems);
+const regressionLockScreens = normalizeRegressionLockScreens(regressionLockDoc.screens ?? []);
 const highRiskRows = screenRows.filter((row) => row.screen.mustReviewAtOriginalSize && row.finalVerdict !== 'PASS');
 const narrativeRiskRows = flowRows.filter((row) => row.finalVerdict !== 'PASS');
 const counts = {
   pass: screenRows.filter((row) => row.finalVerdict === 'PASS').length,
   fail: screenRows.filter((row) => row.finalVerdict === 'FAIL').length,
-  low_confidence: screenRows.filter((row) => row.finalVerdict === 'LOW_CONFIDENCE').length,
+  blocked: screenRows.filter((row) => row.finalVerdict === 'BLOCKED').length,
+  rule_invalid: screenRows.filter((row) => row.finalVerdict === 'RULE_INVALID').length,
+  skip: screenRows.filter((row) => row.finalVerdict === 'SKIP').length,
+  low_confidence: 0,
+};
+const qaQueueCounts = {
+  blocked: qaQueueItems.filter((item) => item.status === 'BLOCKED').length,
+  rule_invalid: qaQueueItems.filter((item) => item.status === 'RULE_INVALID').length,
+  skip: qaQueueItems.filter((item) => item.status === 'SKIP').length,
+  low_confidence: qaQueueItems.filter((item) => item.status === 'LOW_CONFIDENCE').length,
 };
 const automatedGate = assessAutomatedGate();
 const codexGate = assessCodexGate();
@@ -126,11 +155,18 @@ const finalPassEligible =
   automatedGate.status === 'pass' &&
   codexGate.status === 'pass' &&
   counts.fail === 0 &&
-  counts.low_confidence === 0 &&
+  counts.blocked === 0 &&
+  counts.rule_invalid === 0 &&
+  counts.skip === 0 &&
+  qaQueueCounts.blocked === 0 &&
+  qaQueueCounts.rule_invalid === 0 &&
   capture.captured_count === matrix.screens.length &&
   lints.summary?.fail === 0 &&
   review.status === 'pass' &&
   playthroughReview.status === 'pass' &&
+  devQueueItems.length === 0 &&
+  qaQueueItems.length === 0 &&
+  regressionLockScreens.every((screen) => screen.status === 'PASS') &&
   flowRows.every((row) => row.finalVerdict === 'PASS');
 const finalStatus = finalPassEligible ? 'PASS' : qaMode === 'fast' ? '부분 검수 완료' : 'QA 미통과';
 
@@ -159,6 +195,22 @@ const payload = {
     rule_count: fixedRules.length,
     finding_count: fixedRuleQueue.length,
   },
+  dev_queue: {
+    source: devQueuePath,
+    item_count: devQueueItems.length,
+    qa_queue_count: qaQueueItems.length,
+    blocked_count: qaQueueCounts.blocked,
+    rule_invalid_count: qaQueueCounts.rule_invalid,
+    skip_count: qaQueueCounts.skip,
+    low_confidence_count: 0,
+  },
+  regression_lock: {
+    source: regressionLockPath,
+    screen_count: regressionLockScreens.length,
+    fail_count: regressionLockScreens.filter((screen) => screen.status === 'FAIL').length,
+    blocked_count: regressionLockScreens.filter((screen) => screen.status === 'BLOCKED').length,
+    rule_invalid_count: regressionLockScreens.filter((screen) => screen.status === 'RULE_INVALID').length,
+  },
   live_status: liveStatus,
 };
 
@@ -171,6 +223,10 @@ const html = template
 
 await writeFile(outputPath, html);
 console.log(`HTML QA report written to ${outputPath}`);
+
+const markdown = renderMarkdownReport();
+await writeFile(markdownOutputPath, markdown);
+console.log(`Markdown QA report written to ${markdownOutputPath}`);
 
 const calibrationBody = renderCalibrationSetupBody();
 const calibrationHtml = template
@@ -192,7 +248,9 @@ function screenRow(screen) {
     ...(lint?.findings ?? []),
     ...(reviewed?.findings ?? []),
   ].filter((finding) => severityRank(finding.severity) >= severityRank('P2'));
+  const issueStatuses = new Set((reviewed?.qa_issues ?? []).map((issue) => normalizeFinalIssueStatus(issue.status)));
   const hardFail =
+    issueStatuses.has('FAIL') ||
     contract.failures.length > 0 ||
     !captured ||
     !['captured', 'skipped_cached'].includes(captured.status) ||
@@ -202,7 +260,12 @@ function screenRow(screen) {
     reviewed?.ship_readiness === 'prototype_quality' ||
     lowestScore < 4 ||
     severeFindings.length > 0;
-  const lowConfidence =
+  const ruleInvalid =
+    issueStatuses.has('RULE_INVALID') ||
+    reviewed?.status === 'rule_invalid' ||
+    reviewed?.ship_readiness === 'rule_invalid';
+  const blocked =
+    issueStatuses.has('BLOCKED') ||
     contract.notObserved.length > 0 ||
     lint?.status === 'low_confidence' ||
     reviewed?.status === 'low_confidence' ||
@@ -220,14 +283,16 @@ function screenRow(screen) {
       ? 'PASS'
       : hardFail
         ? 'FAIL'
-        : lowConfidence
-        ? 'LOW_CONFIDENCE'
+        : blocked
+        ? 'BLOCKED'
+        : ruleInvalid
+        ? 'RULE_INVALID'
         : 'FAIL';
   const qaJudgementItems = ensureQaJudgementItems(buildQaJudgementItems({
     audit,
+    qaIssues: reviewed?.qa_issues ?? [],
     findings: [...(reviewed?.findings ?? []), ...(lint?.findings ?? [])],
     fixedRules: reviewed?.fixed_rules ?? [],
-    recommendedFix: reviewed?.recommended_fix ?? '',
   }), finalVerdict, {
     targetLabel: `${screen.screen} / ${screen.state}`,
     evidence: !captured
@@ -262,24 +327,25 @@ function flowRow(flow) {
   const severeFindings = (reviewed?.findings ?? []).filter(
     (finding) => severityRank(finding.severity) >= severityRank('P2'),
   );
+  const issueStatuses = new Set((reviewed?.qa_issues ?? []).map((issue) => normalizeFinalIssueStatus(issue.status)));
   const finalVerdict =
-    contract.failures.length > 0
+    issueStatuses.has('FAIL') || contract.failures.length > 0
       ? 'FAIL'
-      : contract.notObserved.length > 0
-        ? 'LOW_CONFIDENCE'
-        :
-    reviewed?.verdict === 'pass' &&
-    lowestScore >= 4 &&
-    severeFindings.length === 0
-      ? 'PASS'
-      : reviewed?.verdict === 'low_confidence'
-        ? 'LOW_CONFIDENCE'
+      : issueStatuses.has('RULE_INVALID') || reviewed?.verdict === 'rule_invalid'
+        ? 'RULE_INVALID'
+        : issueStatuses.has('BLOCKED') || contract.notObserved.length > 0 || reviewed?.verdict === 'low_confidence' || reviewed?.verdict === 'blocked'
+          ? 'BLOCKED'
+          :
+      reviewed?.verdict === 'pass' &&
+      lowestScore >= 4 &&
+      severeFindings.length === 0
+        ? 'PASS'
         : 'FAIL';
   const qaJudgementItems = ensureQaJudgementItems(buildQaJudgementItems({
     audit,
+    qaIssues: reviewed?.qa_issues ?? [],
     findings: reviewed?.findings ?? [],
     fixedRules: reviewed?.fixed_rules ?? [],
-    recommendedFix: reviewed?.recommended_fix ?? '',
   }), finalVerdict, {
     targetLabel: flow.title,
     evidence: reviewed
@@ -312,11 +378,18 @@ function renderBody() {
       ${summaryCard('QA 모드', qaMode, qaMode === 'full' ? 'pass' : 'low')}
       ${summaryCard('캡처 수', `${capture.captured_count}/${capture.expected_count}`, capture.captured_count === capture.expected_count ? 'pass' : 'fail')}
       ${summaryCard('FAIL 화면', String(counts.fail), counts.fail === 0 ? 'pass' : 'fail')}
-      ${summaryCard('LOW 화면', String(counts.low_confidence), counts.low_confidence === 0 ? 'pass' : 'low')}
+      ${summaryCard('BLOCKED 화면', String(counts.blocked), counts.blocked === 0 ? 'pass' : 'low')}
+      ${summaryCard('RULE_INVALID 화면', String(counts.rule_invalid), counts.rule_invalid === 0 ? 'pass' : 'low')}
+      ${summaryCard('LOW_CONFIDENCE', '0', 'pass')}
       ${summaryCard('P0/P1/P2', `${severityCounts.P0}/${severityCounts.P1}/${severityCounts.P2}`, severityCounts.P0 + severityCounts.P1 + severityCounts.P2 === 0 ? 'pass' : 'fail')}
       ${summaryCard('FAIL 판정 항목', String(contractCounts.fail), contractCounts.fail === 0 ? 'pass' : 'fail')}
-      ${summaryCard('QA 보강 필요', String(contractCounts.notObserved), contractCounts.notObserved === 0 ? 'pass' : 'low')}
+      ${summaryCard('BLOCKED 판정 항목', String(contractCounts.blocked), contractCounts.blocked === 0 ? 'pass' : 'low')}
       ${summaryCard('Playthrough', playthroughReview.status ?? 'missing', playthroughReview.status === 'pass' ? 'pass' : 'fail')}
+      ${summaryCard('Dev Queue', String(devQueueItems.length), devQueueItems.length === 0 ? 'pass' : 'fail')}
+      ${summaryCard('QA Queue BLOCKED', String(qaQueueCounts.blocked), qaQueueCounts.blocked === 0 ? 'pass' : 'low')}
+      ${summaryCard('RULE_INVALID', String(qaQueueCounts.rule_invalid), qaQueueCounts.rule_invalid === 0 ? 'pass' : 'low')}
+      ${summaryCard('SKIP', String(qaQueueCounts.skip), qaQueueCounts.skip === 0 ? 'pass' : 'low')}
+      ${summaryCard('Regression Lock', `${regressionLockScreens.filter((screen) => screen.status === 'FAIL').length}/${regressionLockScreens.length}`, regressionLockScreens.some((screen) => screen.status === 'FAIL') ? 'fail' : 'pass')}
       ${summaryCard('고정 QA 룰', String(fixedRules.length), fixedRules.length > 0 ? 'fail' : 'low')}
       ${summaryCard('룰 finding', String(fixedRuleQueue.length), fixedRuleQueue.length === 0 ? 'pass' : 'fail')}
     </div>
@@ -347,18 +420,30 @@ function renderBody() {
 
     <section>
       <h2>수정 큐</h2>
-      <p class="section-note">수정 큐는 repo-tracked 고정 QA 룰이 현재 캡처/흐름에서 검출한 FAIL만 표시합니다. report별 profile 입력값은 이 큐를 직접 만들 수 없습니다.</p>
+      <p class="section-note">수정 큐는 <code>dev_queue.json</code>의 FAIL 티켓만 표시합니다. 각 항목은 검출 근거, 수정 방향, 통과 기준, source pointer를 가져야 합니다.</p>
       <div class="queue priority-queue">
-        ${renderRuleQueueCard('화면 고정 QA 룰 FAIL', fixedRuleQueue.filter((item) => item.type === 'screen_problem'))}
-        ${renderRuleQueueCard('플레이 경험 고정 QA 룰 FAIL', fixedRuleQueue.filter((item) => item.type === 'play_experience'))}
-        ${renderRuleQueueCard('전역 visual 고정 QA 룰 FAIL', fixedRuleQueue.filter((item) => item.type === 'global_visual'))}
+        ${renderIssueQueueCard('화면 FAIL 티켓', devQueueItems.filter((item) => item.target_type === 'screen'))}
+        ${renderIssueQueueCard('플레이 경험 FAIL 티켓', devQueueItems.filter((item) => item.target_type === 'flow'))}
+        ${renderIssueQueueCard('전역 visual FAIL 티켓', devQueueItems.filter((item) => item.target_type === 'global'))}
       </div>
+    </section>
+
+    <section>
+      <h2>QA Queue</h2>
+      <p class="section-note">BLOCKED, RULE_INVALID, SKIP은 개발 큐가 아닙니다. 필요한 artifact를 채우거나 룰을 재작성한 뒤 PASS/FAIL로 재분류해야 합니다.</p>
+      ${renderQaQueueGroups(qaQueueGroups)}
     </section>
 
     <section>
       <h2>캘리브레이션 accepted 개발 후보</h2>
       <p class="section-note">사용자가 accepted한 후보와 학습된 QA 규칙 목록입니다. 이 규칙들이 repo-tracked 고정 룰로 승격되면 수정 큐에 반영됩니다.</p>
       ${renderAcceptedCandidateSection()}
+    </section>
+
+    <section>
+      <h2>Regression Lock</h2>
+      <p class="section-note">사용자가 민감하게 본 5개 회귀 화면은 별도 lock 결과로 고정합니다.</p>
+      <div class="regression-lock-grid">${regressionLockScreens.map(renderRegressionLockCard).join('\n')}</div>
     </section>
 
     <section>
@@ -382,7 +467,7 @@ function renderBody() {
       <div class="summary">
         ${summaryCard('Capture', `${capture.captured_count}/${capture.expected_count}`, capture.captured_count === capture.expected_count ? 'pass' : 'fail')}
         ${summaryCard('Polish Lint PASS 화면', String(lints.summary?.pass ?? 0), (lints.summary?.fail ?? 0) === 0 && (lints.summary?.pass ?? 0) > 0 ? 'pass' : 'low')}
-        ${summaryCard('Polish Lint LOW 화면', String(lints.summary?.low_confidence ?? 0), (lints.summary?.low_confidence ?? 0) === 0 ? 'pass' : 'low')}
+        ${summaryCard('Polish Lint 보류 화면', String(lints.summary?.low_confidence ?? 0), (lints.summary?.low_confidence ?? 0) === 0 ? 'pass' : 'low')}
         ${summaryCard('Polish Lint FAIL', String(lints.summary?.fail ?? 0), (lints.summary?.fail ?? 0) === 0 ? 'pass' : 'fail')}
       </div>
     </section>
@@ -410,9 +495,9 @@ function renderScreenRow(row) {
       <div class="qa-card-section"><h4>QA 판정 항목</h4>${renderJudgementItems(qaJudgementItems)}</div>
       <div class="qa-card-columns">
         <div class="qa-card-section"><h4>자동 검사</h4>${renderFindings(lint?.findings ?? [])}</div>
-        <div class="qa-card-section"><h4>Codex 제품 검수</h4><p>${escapeHtml(reviewed?.review_note ?? reviewed?.rationale ?? '')}</p>${renderFindings(reviewed?.findings ?? [])}</div>
+        <div class="qa-card-section"><h4>Codex 제품 검수</h4><p>${escapeHtml(reviewed?.review_note ?? reviewed?.rationale ?? '')}</p>${renderReviewFindings(reviewed)}</div>
       </div>
-      <div class="qa-card-section"><h4>수정 후보</h4><p>${escapeHtml(reviewed?.recommended_fix ?? '')}</p></div>
+      <div class="qa-card-section"><h4>수정 후보</h4>${renderFixCandidates(reviewed)}</div>
     </div>
   </article>`;
 }
@@ -437,9 +522,9 @@ function renderFlowRow(row) {
       <div class="qa-card-section"><h4>QA 판정 항목</h4>${renderJudgementItems(qaJudgementItems)}</div>
       <div class="qa-card-columns">
         <div class="qa-card-section"><h4>Transcript</h4>${renderList(reviewed?.transcript ?? [])}</div>
-        <div class="qa-card-section"><h4>Findings</h4>${renderFindings(reviewed?.findings ?? [])}</div>
+        <div class="qa-card-section"><h4>Findings</h4>${renderReviewFindings(reviewed)}</div>
       </div>
-      <div class="qa-card-section"><h4>수정 후보</h4><p>${escapeHtml(reviewed?.recommended_fix ?? '')}</p></div>
+      <div class="qa-card-section"><h4>수정 후보</h4>${renderFixCandidates(reviewed)}</div>
     </div>
   </article>`;
 }
@@ -554,18 +639,25 @@ function renderContractAudit(audit) {
   return `<div class="contract-summary">
     ${contractCount('PASS', summary.pass + summary.forbiddenAbsent, 'pass')}
     ${contractCount('FAIL', summary.fail + summary.forbiddenPresent, summary.fail + summary.forbiddenPresent > 0 ? 'fail' : 'pass')}
-    ${contractCount('LOW_CONFIDENCE', summary.evidenceGap, summary.evidenceGap > 0 ? 'low' : 'pass')}
+    ${contractCount('BLOCKED', summary.evidenceGap, summary.evidenceGap > 0 ? 'low' : 'pass')}
     ${contractCount('전체 기준', summary.total, 'pass')}
   </div>
   ${failedRows.length ? renderContractList(failedRows) : '<p class="pass">QA 판정 항목이 모두 PASS입니다.</p>'}
   <details><summary>전체 QA 판정 항목</summary>${renderContractList([...failedRows, ...passRows])}</details>`;
 }
 
-function buildQaJudgementItems({ audit, findings = [], fixedRules = [], recommendedFix = '' }) {
+function buildQaJudgementItems({ audit, qaIssues = [], findings = [], fixedRules = [] }) {
   const fixedRuleById = new Map(fixedRules.map((rule) => [rule.rule_id, rule]));
   const items = [];
+  const issueCriterionIds = new Set();
+  for (const issue of qaIssues) {
+    const item = qaIssueToJudgementItem(issue);
+    items.push(item);
+    issueCriterionIds.add(item.criterionId);
+  }
   for (const finding of findings) {
     if (!finding.rule_id && severityRank(finding.severity) < severityRank('P2')) continue;
+    if (finding.rule_id && issueCriterionIds.has(finding.rule_id)) continue;
     const rule = fixedRuleById.get(finding.rule_id);
     items.push({
       key: finding.rule_id ? `rule:${finding.rule_id}` : `finding:${finding.code ?? finding.message ?? ''}`,
@@ -583,24 +675,54 @@ function buildQaJudgementItems({ audit, findings = [], fixedRules = [], recommen
         '동일 finding이 재검수에서 재현되지 않아야 합니다.',
       nextAction:
         rule?.recommended_fix ??
-        recommendedFix ??
         '해당 finding을 제거하도록 화면/문구/흐름을 수정하세요.',
     });
   }
   for (const row of audit?.rows ?? []) {
-    items.push(contractRowToJudgementItem(row, recommendedFix));
+    if (issueCriterionIds.has(row.id)) continue;
+    items.push(contractRowToJudgementItem(row));
   }
   return dedupeQaJudgementItems(items).sort((a, b) => {
-    const rank = { FAIL: 0, LOW_CONFIDENCE: 1, PASS: 2 };
+    const rank = { FAIL: 0, BLOCKED: 1, RULE_INVALID: 2, PASS: 3, SKIP: 4 };
     const statusDelta = rank[a.status] - rank[b.status];
     if (statusDelta !== 0) return statusDelta;
     return severityRank(b.severity) - severityRank(a.severity);
   });
 }
 
+function qaIssueToJudgementItem(issue) {
+  const criterionId = issue.rule_id ?? String(issue.id ?? '').split('.').at(-1) ?? 'qa_issue';
+  const status = normalizeFinalIssueStatus(issue.status);
+  return {
+    key: `issue:${issue.id}`,
+    status,
+    severity: issue.severity ?? (status === 'FAIL' ? 'P2' : 'P3'),
+    criterionId,
+    criterionName: issue.expected || issue.id || criterionId,
+    observedEvidence:
+      issue.evidence?.observed ??
+      issue.blocked_reason ??
+      '현재 QA issue의 관찰 근거가 필요합니다.',
+    passCriteria:
+      issue.pass_condition ??
+      issue.pass_evidence ??
+      issue.concrete_observed_evidence ??
+      issue.rewritten_rule_suggestion ??
+      '동일 기준을 재검수에서 PASS 근거로 확인해야 합니다.',
+    nextAction:
+      status === 'BLOCKED'
+        ? blockedNextAction(issue)
+        : status === 'RULE_INVALID'
+        ? ruleInvalidNextAction(issue)
+        : status === 'SKIP'
+        ? '현재 QA 범위에서 제외된 기준입니다.'
+        : issue.recommended_fix || '해당 QA issue를 제거하도록 화면/문구/흐름을 수정하세요.',
+  };
+}
+
 function ensureQaJudgementItems(items, verdict, fallback) {
   if (items.length > 0 || verdict === 'PASS') return items;
-  const status = verdict === 'LOW_CONFIDENCE' ? 'LOW_CONFIDENCE' : 'FAIL';
+  const status = verdict === 'BLOCKED' ? 'BLOCKED' : verdict === 'RULE_INVALID' ? 'RULE_INVALID' : verdict === 'SKIP' ? 'SKIP' : 'FAIL';
   return [{
     key: `fallback:${fallback.targetLabel}`,
     status,
@@ -613,46 +735,62 @@ function ensureQaJudgementItems(items, verdict, fallback) {
   }];
 }
 
-function contractRowToJudgementItem(row, recommendedFix) {
+function contractRowToJudgementItem(row) {
   const status = contractJudgementStatus(row.status);
   return {
     key: `contract:${row.category}:${row.id || row.label}`,
     status,
-    severity: status === 'FAIL' ? 'P2' : status === 'LOW_CONFIDENCE' ? 'P3' : '',
+    severity: status === 'FAIL' ? 'P2' : status === 'BLOCKED' ? 'P3' : '',
     criterionId: row.id,
     criterionName: row.label,
     observedEvidence: row.note || contractObservedEvidence(row, status),
     passCriteria: row.label,
-    nextAction: judgementNextAction(status, recommendedFix, row.label),
+    nextAction: judgementNextAction(status, row.label),
   };
 }
 
 function contractJudgementStatus(status) {
   if (status === 'fail' || status === 'forbidden_present') return 'FAIL';
-  if (status === 'evidence_gap') return 'LOW_CONFIDENCE';
+  if (status === 'evidence_gap') return 'BLOCKED';
   return 'PASS';
 }
 
 function contractObservedEvidence(row, status) {
   if (status === 'FAIL') return `${row.label} 기준이 현재 산출물에서 충족되지 않았습니다.`;
-  if (status === 'LOW_CONFIDENCE') {
+  if (status === 'BLOCKED') {
     return `${row.label} 기준을 판정할 원본 캡처, transcript, 동작 증거가 아직 충분하지 않습니다.`;
   }
   return `${row.label} 기준이 현재 산출물에서 확인됐습니다.`;
 }
 
-function judgementNextAction(status, recommendedFix, label) {
+function judgementNextAction(status, label) {
   if (status === 'FAIL') {
-    return recommendedFix || `${label} 기준을 만족하도록 UI/문구/흐름을 수정하세요.`;
+    return `${label} 기준을 만족하도록 해당 화면의 UI, 문구, 상태 표현을 조정하세요.`;
   }
-  if (status === 'LOW_CONFIDENCE') {
+  if (status === 'BLOCKED') {
     return `${label} 기준을 판정할 원본 크기 캡처, 상호작용 기록, 또는 한국어 transcript를 추가해 재검수하세요.`;
+  }
+  if (status === 'RULE_INVALID') {
+    return `${label} 기준을 passIf/failIf/blockedIf가 있는 판정 가능한 룰로 다시 작성하세요.`;
   }
   return '추가 조치 없음';
 }
 
+function blockedNextAction(issue) {
+  const missing = Array.isArray(issue.missing_evidence) && issue.missing_evidence.length
+    ? issue.missing_evidence.join(', ')
+    : issue.required_artifact || '필요한 QA 증거';
+  return `${missing}를 추가한 뒤 PASS 또는 FAIL로 재분류하세요.`;
+}
+
+function ruleInvalidNextAction(issue) {
+  return issue.rewritten_rule_suggestion
+    ? `룰 재작성: ${issue.rewritten_rule_suggestion}`
+    : 'passIf/failIf/blockedIf가 있는 판정 가능한 룰로 재작성하세요.';
+}
+
 function dedupeQaJudgementItems(items) {
-  const priority = { FAIL: 3, LOW_CONFIDENCE: 2, PASS: 1 };
+  const priority = { FAIL: 5, BLOCKED: 4, RULE_INVALID: 3, PASS: 2, SKIP: 1 };
   const byKey = new Map();
   for (const item of items) {
     const key = item.key || item.criterionId || item.criterionName;
@@ -668,16 +806,20 @@ function summarizeQaJudgementItems(items) {
   return items.reduce((summary, item) => {
     summary.total += 1;
     if (item.status === 'FAIL') summary.fail += 1;
-    else if (item.status === 'LOW_CONFIDENCE') summary.low += 1;
+    else if (item.status === 'BLOCKED') summary.blocked += 1;
+    else if (item.status === 'RULE_INVALID') summary.ruleInvalid += 1;
+    else if (item.status === 'SKIP') summary.skip += 1;
     else summary.pass += 1;
     return summary;
-  }, { total: 0, fail: 0, low: 0, pass: 0 });
+  }, { total: 0, fail: 0, blocked: 0, ruleInvalid: 0, skip: 0, pass: 0 });
 }
 
-function renderJudgementSummary(summary = { total: 0, fail: 0, low: 0, pass: 0 }) {
+function renderJudgementSummary(summary = { total: 0, fail: 0, blocked: 0, ruleInvalid: 0, skip: 0, pass: 0 }) {
   return `<div class="contract-summary">
     ${contractCount('FAIL', summary.fail, summary.fail > 0 ? 'fail' : 'pass')}
-    ${contractCount('LOW_CONFIDENCE', summary.low, summary.low > 0 ? 'low' : 'pass')}
+    ${contractCount('BLOCKED', summary.blocked, summary.blocked > 0 ? 'low' : 'pass')}
+    ${contractCount('RULE_INVALID', summary.ruleInvalid, summary.ruleInvalid > 0 ? 'low' : 'pass')}
+    ${summary.skip > 0 ? contractCount('SKIP', summary.skip, 'low') : ''}
     ${contractCount('PASS', summary.pass, 'pass')}
     ${contractCount('전체 기준', summary.total, 'pass')}
   </div>`;
@@ -709,13 +851,13 @@ function renderJudgementLine(item) {
 
 function judgementTone(status) {
   if (status === 'PASS') return 'pass';
-  if (status === 'LOW_CONFIDENCE') return 'low';
+  if (status === 'BLOCKED' || status === 'RULE_INVALID' || status === 'SKIP') return 'low';
   return 'fail';
 }
 
 function verdictTone(verdict) {
   if (verdict === 'PASS') return 'pass';
-  if (verdict === 'LOW_CONFIDENCE') return 'low';
+  if (verdict === 'BLOCKED' || verdict === 'RULE_INVALID' || verdict === 'SKIP') return 'low';
   return 'fail';
 }
 
@@ -743,7 +885,7 @@ function renderContractSummary(contract, audit) {
       : 'QA 판정 항목이 모두 PASS입니다.';
     return `<strong class="pass">QA 판정 PASS</strong><br><span class="muted">${escapeHtml(countText)}</span>`;
   }
-  return `${failures.length > 0 ? `<strong class="fail">FAIL</strong>${renderList(failures)}` : ''}${notObserved.length > 0 ? `<strong class="low">LOW_CONFIDENCE</strong>${renderList(notObserved)}` : ''}`;
+  return `${failures.length > 0 ? `<strong class="fail">FAIL</strong>${renderList(failures)}` : ''}${notObserved.length > 0 ? `<strong class="low">BLOCKED</strong>${renderList(notObserved)}` : ''}`;
 }
 
 function normalizeContractStatus(status) {
@@ -759,7 +901,7 @@ function contractDisplayStatus(status, category) {
   if (status === 'pass') return 'PASS';
   if (status === 'forbidden_absent') return 'PASS';
   if (status === 'forbidden_present') return 'FAIL';
-  if (status === 'evidence_gap') return 'LOW_CONFIDENCE';
+  if (status === 'evidence_gap') return 'BLOCKED';
   return 'FAIL';
 }
 
@@ -768,7 +910,7 @@ function contractReason(status, category, note, label = 'QA 기준') {
   const normalized = normalizeContractStatus(status);
   if (normalized === 'pass' || normalized === 'forbidden_absent') return `PASS: ${label} 기준 확인`;
   if (normalized === 'forbidden_present') return `FAIL: ${label} 금지 조건이 현재 산출물에서 관찰됐습니다.`;
-  if (normalized === 'evidence_gap') return `LOW_CONFIDENCE: ${label} 기준을 판정할 관찰 근거가 더 필요합니다.`;
+  if (normalized === 'evidence_gap') return `BLOCKED: ${label} 기준을 판정할 관찰 근거가 더 필요합니다.`;
   return `FAIL: ${label} 기준이 현재 산출물에서 충족되지 않았습니다.`;
 }
 
@@ -820,6 +962,43 @@ function renderFindings(findings) {
     .join('')}</ul>`;
 }
 
+function renderReviewFindings(reviewed) {
+  if (reviewed?.findings?.length) return renderFindings(reviewed.findings);
+  const issueCount = (reviewed?.qa_issues ?? []).filter((issue) => issue.status !== 'PASS').length;
+  if (issueCount > 0) {
+    return `<span class="muted">세부 근거 ${issueCount}개는 QA 판정 항목에 표시됨</span>`;
+  }
+  return '<span class="muted">추가 finding 없음</span>';
+}
+
+function renderFixCandidates(reviewed) {
+  const failIssues = (reviewed?.qa_issues ?? []).filter((issue) => normalizeFinalIssueStatus(issue.status) === 'FAIL');
+  if (failIssues.length === 0) {
+    const queueIssues = (reviewed?.qa_issues ?? []).filter((issue) =>
+      ['BLOCKED', 'RULE_INVALID', 'SKIP'].includes(normalizeFinalIssueStatus(issue.status)),
+    );
+    if (queueIssues.length > 0) {
+      return `<p class="muted">개발 후보 없음. QA Queue ${escapeHtml(queueIssues.length)}건은 QA Queue 섹션에서 확인합니다.</p>`;
+    }
+    return '<p class="pass">현재 화면 기준 개발 수정 후보 없음</p>';
+  }
+  return `<div class="fix-candidate-list">${failIssues.map(renderFixCandidate).join('')}</div>`;
+}
+
+function renderFixCandidate(issue) {
+  return `<article class="fix-candidate">
+    <div class="fix-candidate-head">
+      <strong>${escapeHtml(issue.id)}</strong>
+      <span class="issue-badges">${badge(issue.severity ?? 'P2')}</span>
+    </div>
+    <div class="issue-fields">
+      ${issueField('수정 방향', issue.recommended_fix)}
+      ${issueField('통과 기준', issue.pass_condition)}
+    </div>
+    ${issue.source_pointer ? `<details class="issue-source"><summary>source</summary><code>${escapeHtml(issue.source_pointer)}</code></details>` : ''}
+  </article>`;
+}
+
 function renderList(items) {
   if (!items || items.length === 0) return '<span class="muted">없음</span>';
   return `<ul>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`;
@@ -827,6 +1006,126 @@ function renderList(items) {
 
 function renderQueueCard(title, items) {
   return `<div class="card"><h3>${escapeHtml(title)}</h3>${renderList(items.length ? items : ['현재 보고서 기준 없음'])}</div>`;
+}
+
+function renderIssueQueueCard(title, items, options = {}) {
+  if (!items.length) {
+    return `<div class="card"><h3>${escapeHtml(title)}</h3><p class="muted">현재 보고서 기준 없음</p></div>`;
+  }
+  const gridClass = options.compact ? 'issue-grid compact' : 'issue-grid';
+  return `<div class="card"><h3>${escapeHtml(title)}</h3><div class="${gridClass}">${items.map((item) => renderIssueQueueItem(item, options)).join('\n')}</div></div>`;
+}
+
+function renderQaQueueGroups(groups) {
+  if (!groups.length) {
+    return '<div class="card"><h3>QA Queue</h3><p class="pass">현재 보고서 기준 QA Queue 없음</p></div>';
+  }
+  return `<div class="qa-queue-groups">${groups.map((group) => `<article class="qa-queue-group card">
+    <div class="issue-card-head">
+      <div>
+        <h3>${escapeHtml(group.title)}</h3>
+        <p class="muted">${escapeHtml(group.description)}</p>
+      </div>
+      <div class="issue-badges">${badge(`${group.items.length}건`)}</div>
+    </div>
+    <div class="issue-grid compact">${group.items.slice(0, 5).map((item) => renderIssueQueueItem(item, { compact: true })).join('\n')}</div>
+    ${group.items.length > 5 ? `<details class="issue-source"><summary>전체 ${escapeHtml(group.items.length)}건 보기</summary><div class="issue-grid compact">${group.items.slice(5).map((item) => renderIssueQueueItem(item, { compact: true })).join('\n')}</div></details>` : ''}
+  </article>`).join('\n')}</div>`;
+}
+
+function renderIssueQueueItem(item, options = {}) {
+  const evidence = item.evidence ?? {};
+  const sourcePointer = item.source_pointer ? String(item.source_pointer) : '';
+  const source = sourcePointer
+    ? `<details class="issue-source"><summary>source</summary><code>${escapeHtml(sourcePointer)}</code></details>`
+    : '';
+  const sourceLine = sourcePointer
+    ? issueField('source', `<code>${escapeHtml(sourcePointer)}</code>`, { rawValue: true })
+    : '';
+  const commonHead = `<div class="issue-card-head">
+      <div>
+        <div class="issue-title">${escapeHtml(item.id)}</div>
+        <div class="issue-target">대상: ${escapeHtml(item.target_type)} <code>${escapeHtml(item.target_id)}</code></div>
+      </div>
+      <div class="issue-badges">${badge(item.status)} ${badge(item.severity)}</div>
+    </div>`;
+  if (options.compact || ['BLOCKED', 'RULE_INVALID', 'SKIP'].includes(item.status)) {
+    const primaryLabel = item.status === 'RULE_INVALID' ? '룰 문제' : item.status === 'SKIP' ? '제외 사유' : '판단 불가';
+    const primaryValue =
+      item.status === 'RULE_INVALID'
+        ? item.invalid_reason
+        : item.status === 'SKIP'
+        ? item.skip_reason
+        : item.blocked_reason;
+    const requiredValue =
+      item.status === 'RULE_INVALID'
+        ? item.rewritten_rule_suggestion
+        : item.status === 'SKIP'
+        ? item.required_artifact
+        : Array.isArray(item.missing_evidence) && item.missing_evidence.length
+        ? item.missing_evidence.join(', ')
+        : item.required_artifact;
+    return `<article class="issue-card ${judgementTone(item.status)}">
+      ${commonHead}
+      <div class="issue-fields">
+        ${issueField(primaryLabel, primaryValue)}
+        ${issueField(item.status === 'RULE_INVALID' ? '재작성 제안' : '필요 artifact', requiredValue)}
+      </div>
+      <details class="issue-source"><summary>상세</summary>
+        <div class="issue-fields">
+          ${issueField('검출 근거', evidence.observed)}
+          ${issueField('기대 상태', item.expected)}
+          ${issueField('통과 기준', item.pass_condition)}
+          ${sourceLine}
+        </div>
+      </details>
+    </article>`;
+  }
+  return `<article class="issue-card ${judgementTone(item.status)}">
+    ${commonHead}
+    <div class="issue-fields">
+      ${issueField('검출 근거', evidence.observed)}
+      ${issueField('기대 상태', item.expected)}
+      ${issueField('수정 방향', item.recommended_fix)}
+      ${issueField('통과 기준', item.pass_condition)}
+    </div>
+    ${source}
+  </article>`;
+}
+
+function issueField(label, value, options = {}) {
+  const renderedValue = options.rawValue ? String(value ?? '') : escapeHtml(value ?? '');
+  return `<div class="issue-field"><b>${escapeHtml(label)}</b><span>${renderedValue}</span></div>`;
+}
+
+function renderRegressionLockCard(screen) {
+  return `<article class="regression-lock-card ${verdictTone(screen.status)}">
+    <div class="regression-lock-head">
+      <div>
+        <h3>${escapeHtml(screen.screen ?? screen.id)}</h3>
+        <p class="muted">${escapeHtml(screen.id)} · ${escapeHtml(screen.screenshot ?? 'screenshot 미기록')}</p>
+      </div>
+      ${badge(screen.status)}
+    </div>
+    <div class="lock-check-grid">${(screen.checks ?? []).map(renderLockCheck).join('')}</div>
+  </article>`;
+}
+
+function renderLockCheck(check) {
+  const queueLink = check.dev_queue_item_id ?? 'QA 보강 또는 PASS';
+  return `<article class="lock-check ${judgementTone(check.status)}">
+    <div class="lock-check-head">
+      <div class="lock-check-title">${escapeHtml(check.id ?? check.issue_id ?? 'lock check')}</div>
+      <span class="contract-badge ${judgementTone(check.status)}">${escapeHtml(check.status)}</span>
+    </div>
+    <div class="lock-check-body">
+      <div><b>관찰 근거</b> ${escapeHtml(check.evidence ?? '')}</div>
+      <details><summary>통과 기준 / 큐 연결</summary>
+        <div><b>통과 기준</b> ${escapeHtml(check.pass_condition ?? '')}</div>
+        <div><b>큐 연결</b> ${escapeHtml(queueLink)}</div>
+      </details>
+    </div>
+  </article>`;
 }
 
 function renderRuleQueueCard(title, items) {
@@ -870,6 +1169,120 @@ function collectFixedRuleQueue() {
     items.push(ruleQueueItem('global_visual', globalTargetLabel(rule.target_id), rule, finding));
   }
   return items;
+}
+
+function normalizeDevQueueItems(items) {
+  if (!Array.isArray(items)) return [];
+  return items.map((item) => ({
+    ...item,
+    id: String(item.id ?? ''),
+    source: String(item.source ?? ''),
+    target_type: String(item.target_type ?? ''),
+    target_id: String(item.target_id ?? ''),
+    status: normalizeFinalIssueStatus(item.status),
+    severity: String(item.severity ?? ''),
+    category: String(item.category ?? ''),
+    evidence: item.evidence && typeof item.evidence === 'object' ? item.evidence : {},
+    expected: String(item.expected ?? ''),
+    recommended_fix: String(item.recommended_fix ?? ''),
+    pass_condition: String(item.pass_condition ?? ''),
+    source_pointer: String(item.source_pointer ?? ''),
+    missing_evidence: Array.isArray(item.missing_evidence) ? item.missing_evidence : [],
+    blocked_reason: item.blocked_reason ? String(item.blocked_reason) : '',
+    required_artifact: item.required_artifact ? String(item.required_artifact) : '',
+    invalid_reason: item.invalid_reason ? String(item.invalid_reason) : '',
+    rewritten_rule_suggestion: item.rewritten_rule_suggestion ? String(item.rewritten_rule_suggestion) : '',
+    skip_reason: item.skip_reason ? String(item.skip_reason) : '',
+  })).filter((item) => item.id);
+}
+
+function groupQaQueueItems(items) {
+  const groups = new Map();
+  for (const item of items) {
+    const family = qaQueueFamily(item);
+    if (!groups.has(family.key)) {
+      groups.set(family.key, { ...family, items: [] });
+    }
+    groups.get(family.key).items.push(item);
+  }
+  return [...groups.values()].sort((a, b) => b.items.length - a.items.length || a.title.localeCompare(b.title));
+}
+
+function qaQueueFamily(item) {
+  const haystack = `${item.id} ${item.rule_id ?? ''} ${item.category ?? ''} ${item.required_artifact ?? ''} ${item.blocked_reason ?? ''}`.toLowerCase();
+  if (item.status === 'RULE_INVALID') {
+    return {
+      key: 'rule_invalid',
+      title: 'Rule invalid / vague criterion',
+      description: 'passIf/failIf/blockedIf가 없거나 판정 불가능한 기준입니다.',
+    };
+  }
+  if (haystack.includes('transcript') || haystack.includes('flow')) {
+    return {
+      key: 'flow_transcript_missing',
+      title: 'Flow transcript 누락',
+      description: '실제 한국어 문구와 사용자 행동 순서가 없어 흐름 PASS/FAIL을 확정할 수 없습니다.',
+    };
+  }
+  if (haystack.includes('guardian') || haystack.includes('portrait') || haystack.includes('renderedguardians')) {
+    return {
+      key: 'guardian_metadata_missing',
+      title: 'Guardian portrait metadata 누락',
+      description: 'expectedCharacters/renderedGuardians 또는 초상 metadata가 없어 캐릭터 기준을 확정할 수 없습니다.',
+    };
+  }
+  if (haystack.includes('motion') || haystack.includes('live2d') || haystack.includes('video_2s')) {
+    return {
+      key: 'motion_evidence_missing',
+      title: 'Motion evidence 누락',
+      description: '정지 캡처만으로는 motion/Live2D-like 기준을 판정하지 않습니다.',
+    };
+  }
+  if (haystack.includes('ending') || haystack.includes('cycle') || haystack.includes('payoff')) {
+    return {
+      key: 'ending_payoff_state_missing',
+      title: 'Ending payoff state snapshot 누락',
+      description: '회차 상태와 payoff 증거가 없어 엔딩 기준을 확정할 수 없습니다.',
+    };
+  }
+  if (haystack.includes('archive')) {
+    return {
+      key: 'archive_interaction_missing',
+      title: 'Archive interaction evidence 누락',
+      description: '저장고 목록/상세 상호작용 증거가 없어 기록 가치를 확정할 수 없습니다.',
+    };
+  }
+  return {
+    key: 'qa_artifact_missing',
+    title: 'QA artifact 누락',
+    description: '판정에 필요한 캡처, metadata, 상태 snapshot 또는 runner 산출물이 부족합니다.',
+  };
+}
+
+function normalizeRegressionLockScreens(screens) {
+  if (!Array.isArray(screens)) return [];
+  return screens.map((screen) => ({
+    ...screen,
+    id: String(screen.id ?? ''),
+    screen: String(screen.screen ?? screen.id ?? ''),
+    status: normalizeFinalIssueStatus(screen.status ?? 'BLOCKED'),
+    screenshot: screen.screenshot ? String(screen.screenshot) : '',
+    checks: Array.isArray(screen.checks) ? screen.checks : [],
+    dev_queue_item_ids: Array.isArray(screen.dev_queue_item_ids) ? screen.dev_queue_item_ids : [],
+  })).filter((screen) => screen.id);
+}
+
+function renderMarkdownReport() {
+  const queueLines = devQueueItems.length
+    ? devQueueItems.map((item) => `- **${item.severity} ${item.id}** (${item.target_id})\n  - 근거: ${item.evidence?.observed ?? ''}\n  - 수정: ${item.recommended_fix}\n  - 통과 기준: ${item.pass_condition}`)
+    : ['- 현재 보고서 기준 수정 큐 없음'];
+  const queueGroupLines = qaQueueGroups.length
+    ? qaQueueGroups.map((group) => `- **${group.title}**: ${group.items.length}건\n${group.items.slice(0, 5).map((item) => `  - ${item.status} ${item.id}: ${item.blocked_reason || item.invalid_reason || item.skip_reason || item.required_artifact || '상세 미기록'}`).join('\n')}`)
+    : ['- 현재 보고서 기준 QA Queue 없음'];
+  const lockLines = regressionLockScreens.length
+    ? regressionLockScreens.map((screen) => `- **${screen.id}**: ${screen.status} (${(screen.checks ?? []).length} checks, queue ${(screen.dev_queue_item_ids ?? []).length})`)
+    : ['- regression_lock.json 미생성'];
+  return `# Dragonout QA Report\n\n생성 시각: ${new Date().toISOString()}\n\n## 최종 상태\n\n- 상태: ${finalStatus}\n- Dev Queue FAIL: ${devQueueItems.length}\n- QA Queue BLOCKED: ${qaQueueCounts.blocked}\n- RULE_INVALID: ${qaQueueCounts.rule_invalid}\n- SKIP: ${qaQueueCounts.skip}\n- LOW_CONFIDENCE: 0\n- Regression Lock FAIL: ${regressionLockScreens.filter((screen) => screen.status === 'FAIL').length}/${regressionLockScreens.length}\n\n## 수정 큐\n\n${queueLines.join('\n')}\n\n## QA Queue\n\n${queueGroupLines.join('\n')}\n\n## Regression Lock\n\n${lockLines.join('\n')}\n\n## 검증 명령\n\n- \`node tools/qa_build_dev_queue.mjs\`\n- \`QA_MODE=${qaMode} QA_EXPECT_FINAL_STATUS=not_pass node tools/qa_validate_report.mjs\`\n`;
 }
 
 function ruleQueueItem(type, targetLabel, rule, finding) {
@@ -1443,12 +1856,30 @@ function formatKst(value) {
 function badge(value) {
   const text = String(value);
   const lower = text.toLowerCase();
-  const tone = lower.includes('pass') || lower.includes('ready') || lower.includes('완료') || lower.includes('accepted')
+  const severityTone = /^p[0-3]$/.test(lower) ? (lower === 'p3' ? 'low' : 'fail') : null;
+  const tone = severityTone ?? (lower.includes('pass') || lower.includes('ready') || lower.includes('완료') || lower.includes('accepted')
     ? 'pass'
     : lower.includes('low') || lower.includes('부분') || lower.includes('not_observed') || lower.includes('pending') || lower.includes('needs_rewrite')
       ? 'low'
-      : 'fail';
+      : 'fail');
   return `<span class="badge ${tone}">${escapeHtml(text)}</span>`;
+}
+
+function normalizeFinalIssueStatus(status) {
+  const raw = String(status ?? '').trim().toUpperCase();
+  if (raw === 'LOW' || raw === 'LOW_CONFIDENCE' || raw === 'EVIDENCE_GAP' || raw === 'NOT_OBSERVED') {
+    return 'BLOCKED';
+  }
+  if (raw === 'BLOCKED' || raw === 'RULE_INVALID' || raw === 'PASS' || raw === 'FAIL' || raw === 'SKIP') {
+    return raw;
+  }
+  const lower = String(status ?? '').trim().toLowerCase();
+  if (lower === 'blocked') return 'BLOCKED';
+  if (lower === 'rule_invalid') return 'RULE_INVALID';
+  if (lower === 'pass') return 'PASS';
+  if (lower === 'fail') return 'FAIL';
+  if (lower === 'skip') return 'SKIP';
+  return raw || 'BLOCKED';
 }
 
 function contractTone(status) {
@@ -1492,12 +1923,12 @@ function countSeverity(rows) {
 
 function countContractFindings(screenRows, flowRows) {
   let fail = 0;
-  let notObserved = 0;
+  let blocked = 0;
   for (const row of [...screenRows, ...flowRows]) {
     fail += row.contract?.failures?.length ?? 0;
-    notObserved += row.contract?.notObserved?.length ?? 0;
+    blocked += row.contract?.notObserved?.length ?? 0;
   }
-  return { fail, notObserved };
+  return { fail, blocked };
 }
 
 function escapeHtml(value) {

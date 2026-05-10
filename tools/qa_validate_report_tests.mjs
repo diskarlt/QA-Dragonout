@@ -368,7 +368,7 @@ const tests = [
       for (const ruleId of [
         'cta_ssot_contract',
         'guardian_presence_exact',
-        'guardian_motion.pseudo_live2d_presence',
+        'guardian_motion_pseudo_live2d_presence',
         'guardian_portrait_no_crop',
         'guardian_portrait_scale_consistency',
       ]) {
@@ -376,7 +376,7 @@ const tests = [
           throw new Error(`expected product qa_issues to include ${ruleId}`);
         }
         if (!html.includes(ruleId)) throw new Error(`expected report.html to include ${ruleId}`);
-        if (ruleId === 'guardian_motion.pseudo_live2d_presence') {
+        if (ruleId === 'guardian_motion_pseudo_live2d_presence') {
           if (!devQueue.qa_queue.some((item) => item.rule_id === ruleId && item.status === 'BLOCKED')) {
             throw new Error(`expected qa_queue to include blocked motion rule ${ruleId}`);
           }
@@ -1206,7 +1206,7 @@ function calS02Rules() {
       source: 'test_fixture',
     },
     {
-      rule_id: 'guardian_motion.pseudo_live2d_presence',
+      rule_id: 'guardian_motion_pseudo_live2d_presence',
       assertion: '가디언 표현은 정지 screenshot만으로 motion/Live2D-like 상태를 확정하지 않는다.',
       current_observation: '테스트 fixture에서 CAL-S02 motion 룰은 비디오 또는 timestamp frame artifact가 없으면 BLOCKED로 남아야 한다.',
       pass_criteria: '눈/호흡/표정/오버레이 등 레이어 단위 움직임 또는 상태 변화가 2초 비디오나 3개 timestamp frame으로 확인되어야 한다.',

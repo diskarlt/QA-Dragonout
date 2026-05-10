@@ -765,7 +765,7 @@ function isMotionCriterion(item) {
     'guardian_live2d_layered_motion',
     'static_portrait_no_live2d',
     'static_portrait_no_motion_evidence',
-    'guardian_motion.pseudo_live2d_presence',
+    'guardian_motion_pseudo_live2d_presence',
   ].includes(item.id);
 }
 
@@ -790,7 +790,7 @@ function hasUsableGuardianArtifact(artifact) {
 
 function requiresMotionEvidence(rule) {
   return (rule.requires_evidence ?? []).includes('video_2s_or_3_timestamp_frames') ||
-    ['guardian_live2d_layered_motion', 'guardian_motion.pseudo_live2d_presence'].includes(rule.rule_id);
+    ['guardian_live2d_layered_motion', 'guardian_motion_pseudo_live2d_presence'].includes(rule.rule_id);
 }
 
 function matrixFailEvidence(screen, item, group, lint) {

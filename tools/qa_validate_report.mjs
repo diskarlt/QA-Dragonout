@@ -734,7 +734,7 @@ async function validateFixedRules() {
     'guardian_presence_exact',
     'guardian_portrait_scale_consistency',
     'guardian_portrait_no_crop',
-    'guardian_motion.pseudo_live2d_presence',
+    'guardian_motion_pseudo_live2d_presence',
     'cta_ssot_contract',
   ]) {
     if (!calS02Rules.has(ruleId)) {
@@ -958,7 +958,7 @@ async function validateHtmlReport() {
       'guardian_presence_exact',
       'guardian_portrait_scale_consistency',
       'guardian_portrait_no_crop',
-      'guardian_motion.pseudo_live2d_presence',
+      'guardian_motion_pseudo_live2d_presence',
       'cta_ssot_contract',
     ]) {
       if (!html.includes(ruleId)) {
@@ -1017,7 +1017,7 @@ async function validateCalibrationSetupHtml() {
     'guardian_presence_exact',
     'guardian_portrait_scale_consistency',
     'guardian_portrait_no_crop',
-    'guardian_motion.pseudo_live2d_presence',
+    'guardian_motion_pseudo_live2d_presence',
     'cta_ssot_contract',
   ]) {
     if (!html.includes(ruleId)) {

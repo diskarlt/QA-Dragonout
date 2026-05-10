@@ -12,7 +12,7 @@ export const REQUIRED_BASE_STATUS_RULE_IDS = [
   'guardian_presence_exact',
   'guardian_portrait_scale_consistency',
   'guardian_portrait_no_crop',
-  'guardian_motion.pseudo_live2d_presence',
+  'guardian_motion_pseudo_live2d_presence',
   'cta_ssot_contract',
 ];
 

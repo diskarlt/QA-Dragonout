@@ -1,25 +1,28 @@
-# QA-Dragonout Agent Guardrails
+# QA-Dragonout 에이전트 가드레일
 
-## Branch and PR Policy
+## 브랜치 및 PR 정책
 
-QA-Dragonout work should happen on a dedicated task branch in the current `/Users/euna/Developer/QA-Dragonout` checkout by default.
+QA-Dragonout 작업은 기본적으로 현재 `/Users/euna/Developer/QA-Dragonout` 체크아웃의 전용 작업 브랜치에서 진행한다.
 
-- Before making repo-tracked edits, inspect the current workspace with `git status --short --branch`.
-- If the workspace is clean and the task requires repo-tracked edits, create or switch to a dedicated task branch with:
+- Git 추적 대상 파일을 수정하기 전에는 `git status --short --branch`로 현재 작업트리 상태를 확인한다.
+- 작업트리가 깨끗하고 Git 추적 대상 파일 수정이 필요한 작업이라면 전용 작업 브랜치를 만들거나 전환한다.
 
   ```sh
   git switch -c feature/<short-name>
   ```
 
-- Development work must be tracked through a GitHub issue. Pure documentation-only guardrail updates, typo fixes, and small explanatory edits that do not change code behavior or verification flow do not require an issue.
-- Task branches and PR descriptions must reference the related issue number for development work.
-- Open a PR after the required tests and checks pass. Do not merge directly into `main` or push `main` as the default completion flow.
-- If the current checkout is dirty before a task starts, assume the changes belong to the user or another concurrent task and ask before creating a branch or editing files.
+- 개발 작업은 GitHub 이슈로 추적해야 한다. 순수 문서 전용 가드레일 업데이트, 오타 수정, 코드 동작이나 검증 흐름을 바꾸지 않는 작은 설명 보강은 이슈가 없어도 된다.
+- 개발 작업용 브랜치와 PR 설명에는 관련 이슈 번호를 참조해야 한다.
+- PR은 필요한 테스트와 체크가 모두 `PASS`인 상태에서 연다. `main`에 직접 merge하거나 `main`을 기본 완료 흐름으로 push하지 않는다.
+- PR 본문에는 `Verification` 섹션을 포함해 실행한 테스트/체크 명령과 최종 결과를 증적으로 남긴다. 검토 준비 상태 PR의 필수 항목은 `PASS`여야 한다.
+- `FAIL` 또는 `SKIPPED` 항목이 남아 있으면 검토 준비 상태 PR을 열지 않는다. 공유가 꼭 필요하면 초안 PR로 열거나, PR 생성 없이 실패/미실행 사유와 다음 조치를 보고한다.
+- 샌드박스, 네트워크, 로컬호스트 바인딩, 권한 제한으로 처음 실패한 뒤 승인된 재실행에서 통과했다면 최종 결과는 `PASS`로 기록하고, 최초 실패 사유와 재실행 사실도 함께 남긴다.
+- 작업 시작 전에 현재 체크아웃이 변경된 상태라면 해당 변경은 사용자나 다른 동시 작업의 것으로 보고, 브랜치를 만들거나 파일을 수정하기 전에 사용자에게 확인한다.
 
-## QA Runner Safety
+## QA Runner 안전 규칙
 
-`/Users/euna/Developer/QA-Dragonout` is the persistent canonical QA runner project for Dragonout.
+`/Users/euna/Developer/QA-Dragonout`는 Dragonout의 영속적인 기준 QA runner 프로젝트다.
 
-- Port `64700` is reserved for this runner.
-- Do not delete, recreate, prune, or clean this repository unless the user explicitly names this exact path and asks for that destructive action in the same turn.
-- Dragonout app branches or worktrees may be QA targets, but they must delegate to this central runner instead of binding the Dashboard port themselves.
+- 포트 `64700`은 이 runner 전용으로 예약되어 있다.
+- 사용자가 같은 대화 차례에서 이 정확한 경로를 명시하고 파괴적 작업을 요청하지 않는 한, 이 저장소를 삭제, 재생성, 정리, 초기화하지 않는다.
+- Dragonout 앱 브랜치나 작업트리는 QA 대상이 될 수 있지만, Dashboard 포트를 직접 바인딩하지 말고 중앙 runner에 위임해야 한다.

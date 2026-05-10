@@ -1,0 +1,186 @@
+{
+  "version": 1,
+  "round": "regression-core-v1",
+  "rules": [
+    {
+      "rule_id": "start_cta_ssot_contract",
+      "source_candidate_id": "CAL-S01",
+      "type": "screen_problem",
+      "target_id": "start",
+      "assertion": "시작 화면 CTA는 SSoT 계약의 시작 행동 명칭과 일치해야 하며 임의 문구로 흐름을 바꾸면 FAIL이다.",
+      "observed_evidence": "final_02_start.png에서 시작 CTA 문구와 주변 설명이 SSoT의 시작 행동 계약과 분리되어 보인다.",
+      "pass_criteria": "시작 화면 CTA와 주변 문구가 SSoT의 시작 행동 명칭, 역할, 첫 플레이 기대값을 같은 구조로 설명해야 한다.",
+      "recommended_fix": "시작 CTA 문구와 상태 전이를 SSoT 계약에 맞춘다.",
+      "severity": "P1"
+    },
+    {
+      "rule_id": "main_logo_not_plain_text",
+      "source_candidate_id": "CAL-S01",
+      "type": "screen_problem",
+      "target_id": "start",
+      "assertion": "첫 화면의 Dragonout 표식은 단순 텍스트 타이틀이 아니라 메인 로고/브랜드 표현으로 보여야 한다.",
+      "observed_evidence": "final_02_start.png에서 Dragonout 표식이 메인 로고가 아니라 일반 텍스트 타이틀처럼 보인다.",
+      "pass_criteria": "첫 화면 첫 viewport에서 Dragonout 로고 또는 로고에 준하는 브랜드 표식이 명확히 보여야 한다.",
+      "recommended_fix": "Dragonout 표식을 단순 텍스트가 아닌 로고/브랜드 표현으로 교체한다.",
+      "severity": "P1"
+    },
+    {
+      "rule_id": "guardian_presence_exact",
+      "source_candidate_id": "CAL-S02",
+      "type": "screen_problem",
+      "target_id": "base_status",
+      "assertion": "거점 화면은 나와야 하는 가디언 네 명만 정확히 보여야 하며, 누락/초과/이름-초상 불일치가 있으면 FAIL이다.",
+      "observed_evidence": "final_04_base_status.png에서 라미르, 카엘, 에르샤, 오르덴 네 가디언이 각각 카드로 보이지만, QA는 이 정확한 등장 조건을 별도 룰로 검출하지 못했다.",
+      "pass_criteria": "거점 화면에는 라미르, 카엘, 에르샤, 오르덴 네 명이 모두 보이고 추가/누락 캐릭터가 없으며 이름과 초상이 일치해야 한다.",
+      "recommended_fix": "거점 가디언 목록의 expected character set과 렌더링된 카드/초상/이름 매칭을 QA와 UI에서 함께 고정한다.",
+      "severity": "P0"
+    },
+    {
+      "rule_id": "guardian_portrait_scale_consistency",
+      "source_candidate_id": "CAL-S02",
+      "type": "screen_problem",
+      "target_id": "base_status",
+      "assertion": "거점 가디언 초상화는 카드 사이에서 얼굴/상반신 비율이 일관되지 않으면 FAIL이다.",
+      "observed_evidence": "final_04_base_status.png에서 가디언 초상화의 얼굴 크기와 상반신 노출 비율이 서로 다르게 보인다.",
+      "pass_criteria": "모든 가디언 카드에서 얼굴 크기, 상반신 노출, 기준선이 같은 portrait spec 안에 들어와야 한다.",
+      "recommended_fix": "가디언 초상 비율과 카드 기준선을 같은 portrait spec으로 맞춘다.",
+      "severity": "P0"
+    },
+    {
+      "rule_id": "guardian_portrait_no_crop",
+      "source_candidate_id": "CAL-S02",
+      "type": "screen_problem",
+      "target_id": "base_status",
+      "assertion": "가디언 portrait는 머리와 핵심 실루엣이 카드 안전영역에서 잘리면 FAIL이다.",
+      "observed_evidence": "final_04_base_status.png에서 카엘 머리 부분이 portrait 카드 안전영역 밖으로 잘려나간다.",
+      "pass_criteria": "카엘을 포함한 모든 가디언 portrait의 머리와 핵심 실루엣이 카드 내부 안전영역에 온전히 들어와야 한다.",
+      "recommended_fix": "카엘 portrait crop과 안전영역을 재조정한다.",
+      "severity": "P0"
+    },
+    {
+      "rule_id": "guardian_motion.pseudo_live2d_presence",
+      "source_candidate_id": "CAL-S02",
+      "type": "screen_problem",
+      "target_id": "base_status",
+      "assertion": "가디언 portrait는 pseudo-Live2D 레이어 변화가 video/frame artifact에서 확인되어야 한다.",
+      "observed_evidence": "final_04_base_status.png는 정지 screenshot이므로 가디언 motion 상태를 판정할 수 없다.",
+      "pass_criteria": "video_2s_or_3_timestamp_frames artifact에서 눈/호흡/표정/오버레이 중 하나 이상의 레이어 변화가 확인되어야 한다.",
+      "recommended_fix": "2초 비디오 또는 3 timestamp frame artifact를 캡처한 뒤 pseudo-Live2D 상태를 판정한다.",
+      "severity": "P0",
+      "requires_evidence": [
+        "video_2s_or_3_timestamp_frames"
+      ],
+      "category": "motion_evidence"
+    },
+    {
+      "rule_id": "cta_ssot_contract",
+      "source_candidate_id": "CAL-S02",
+      "type": "screen_problem",
+      "target_id": "base_status",
+      "assertion": "거점 화면 CTA는 SSoT 계약의 행동 명칭과 상태 전이를 어기면 FAIL이다.",
+      "observed_evidence": "final_04_base_status.png의 CTA 문구와 상태 전이가 SSoT 행동 계약과 충돌한다.",
+      "pass_criteria": "CTA 문구, 상태, 전이가 SSoT에 정의된 행동명과 동일하며 화면 내 다른 문구와 충돌하지 않아야 한다.",
+      "recommended_fix": "거점 CTA 문구와 상태 전이를 SSoT 계약에 맞춘다.",
+      "severity": "P0"
+    },
+    {
+      "rule_id": "guardian_dialog_state_copy_context",
+      "source_candidate_id": "CAL-S03",
+      "type": "screen_problem",
+      "target_id": "guardian_dialog",
+      "assertion": "가디언 대화 모달의 상태 문구는 왜 필요한지 맥락이 없으면 FAIL이다.",
+      "observed_evidence": "final_09_guardian_dialog.png에서 '대화 가능' 문구가 등장하지만 관계, 기능, 다음 행동과 연결되지 않는다.",
+      "pass_criteria": "상태 문구는 관계, 기능, 다음 행동 중 하나를 명확히 설명하고 대화 본문과 연결되어야 한다.",
+      "recommended_fix": "'대화 가능' 문구를 관계/상태 맥락이 있는 문구로 바꾼다.",
+      "severity": "P1"
+    },
+    {
+      "rule_id": "guardian_dialog_portrait_distinct",
+      "source_candidate_id": "CAL-S03",
+      "type": "screen_problem",
+      "target_id": "guardian_dialog",
+      "assertion": "대화 모달 portrait가 배경과 동일한 이미지라 기능 대비가 약하면 FAIL이다.",
+      "observed_evidence": "final_09_guardian_dialog.png의 모달 portrait가 배경과 동일한 초상화로 보여 대화 기능의 시각 대비가 약하다.",
+      "pass_criteria": "대화 모달은 배경과 구별되는 portrait crop, 표정, 조명, 레이어 상태 중 하나 이상을 가져야 한다.",
+      "recommended_fix": "대화 모달 전용 portrait 상태를 배경과 구별되게 만든다.",
+      "severity": "P1"
+    },
+    {
+      "rule_id": "outing_cta_ssot_contract",
+      "source_candidate_id": "CAL-S05",
+      "type": "screen_problem",
+      "target_id": "outing",
+      "assertion": "외출 화면 CTA는 SSoT 계약의 복귀/진행 행동 명칭과 어긋나면 FAIL이다.",
+      "observed_evidence": "final_11_outing.png의 복귀 CTA와 주변 기대값이 SSoT의 복귀 행동 계약과 충돌한다.",
+      "pass_criteria": "외출 화면 CTA가 SSoT의 복귀 행동, 결과 기대값, 상태 전이를 같은 용어로 설명해야 한다.",
+      "recommended_fix": "외출 화면 CTA 문구와 결과 기대값을 SSoT 복귀 행동 계약에 맞춘다.",
+      "severity": "P1"
+    },
+    {
+      "rule_id": "first_report_flow_role_separation",
+      "source_candidate_id": "CAL-F02",
+      "type": "play_experience",
+      "target_id": "first_report_flow",
+      "assertion": "첫 보고-선택-결과 흐름은 요약, 상세, 선택, 결과, 복귀의 문구 역할이 반복되면 FAIL이다.",
+      "observed_evidence": "첫 보고 흐름에서 요약, 상세, 선택, 결과, 복귀가 각자 다른 정보 역할과 payoff를 충분히 분리하지 못한다.",
+      "pass_criteria": "요약/상세/선택/결과/복귀 각 단계가 서로 다른 정보 역할과 payoff를 가져야 한다.",
+      "recommended_fix": "첫 보고 흐름을 요약-판단-선택-결산-수습 역할로 재분리한다.",
+      "severity": "P0"
+    },
+    {
+      "rule_id": "decorative_chrome_no_text_overlap",
+      "source_candidate_id": "CAL-G01",
+      "type": "global_visual",
+      "target_id": "global_visual_chrome",
+      "assertion": "박스 배경의 괄호/코너 장식이 텍스트나 버튼을 침범하면 전역 visual FAIL이다.",
+      "observed_evidence": "여러 박스형 HUD에서 괄호/코너 장식이 텍스트나 버튼 bounding box에 가까워 시야를 방해한다.",
+      "pass_criteria": "모든 박스 장식은 텍스트와 CTA bounding box 밖에 있어야 하며, 겹침이 발생하는 화면은 QA FAIL로 잡혀야 한다.",
+      "recommended_fix": "HUD 박스 장식의 레이어, 여백, 투명도, 위치 규칙을 전역으로 조정한다.",
+      "severity": "P1"
+    },
+    {
+      "rule_id": "ending_guardian_portrait_no_crop",
+      "source_candidate_id": "CAL-F03",
+      "type": "screen_problem",
+      "target_id": "ending_cycle1",
+      "assertion": "엔딩 화면의 가디언 portrait는 머리와 핵심 실루엣이 안전영역 밖으로 잘리면 FAIL이다.",
+      "observed_evidence": "엔딩 결산 화면에서 가디언 portrait 머리나 핵심 실루엣이 카드 안전영역 밖으로 잘릴 수 있다.",
+      "pass_criteria": "엔딩 결산 화면의 portrait 머리와 핵심 실루엣이 카드 안전영역에 온전히 들어와야 한다.",
+      "recommended_fix": "엔딩 화면 portrait safeArea와 crop을 재조정한다.",
+      "severity": "P0"
+    },
+    {
+      "rule_id": "ending_resource_badge_clarity",
+      "source_candidate_id": "CAL-F03",
+      "type": "screen_problem",
+      "target_id": "ending_cycle1",
+      "assertion": "엔딩 결산의 자원/해금/결산 정보가 흰 비트맵 배지처럼 떠 보이면 FAIL이다.",
+      "observed_evidence": "엔딩 결산 화면에서 자원/해금 정보가 HUD 톤과 분리된 흰 배경 배지 패턴으로 보일 수 있다.",
+      "pass_criteria": "자원/해금 정보가 HUD 톤과 통합되고 흰 배경 배지 패턴이 없어야 한다.",
+      "recommended_fix": "엔딩 자원·해금 정보 배지 배경을 HUD 톤에 맞게 수정한다.",
+      "severity": "P1"
+    },
+    {
+      "rule_id": "ending_lock_unlock_state_clarity",
+      "source_candidate_id": "CAL-F03",
+      "type": "screen_problem",
+      "target_id": "ending_cycle1",
+      "assertion": "엔딩 화면의 잠김/해금 상태가 아이콘, 문구, 접근 가능 여부로 구분되지 않으면 FAIL이다.",
+      "observed_evidence": "엔딩 결산 화면에서 잠김 항목과 해금 항목이 시각적으로 구분되지 않을 수 있다.",
+      "pass_criteria": "잠김 항목과 해금 항목이 아이콘·문구·상태 표시 중 하나 이상으로 명확히 구분되어야 한다.",
+      "recommended_fix": "잠김/해금 상태 표현을 아이콘 또는 명시적 문구로 보강한다.",
+      "severity": "P1"
+    },
+    {
+      "rule_id": "ending_badge_overdensity",
+      "source_candidate_id": "CAL-F03",
+      "type": "screen_problem",
+      "target_id": "ending_cycle1",
+      "assertion": "엔딩 결산 정보가 배지·수치 과밀로 읽히면 FAIL이다.",
+      "observed_evidence": "엔딩 결산 화면에서 배지와 수치가 밀집되어 결산 보상보다 목록처럼 읽힐 수 있다.",
+      "pass_criteria": "엔딩 화면이 배지와 수치 나열이 아니라 결산 보상으로 읽혀야 한다.",
+      "recommended_fix": "엔딩 결산 정보 밀도를 낮추고 위계를 명확히 한다.",
+      "severity": "P1"
+    }
+  ]
+}

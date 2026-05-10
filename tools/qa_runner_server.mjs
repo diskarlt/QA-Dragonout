@@ -189,7 +189,7 @@ async function runJob(job) {
       await runProcessStep(job, 'build', 'flutter build web --debug', 'flutter', ['build', 'web', '--debug'], { cwd: job.targetWorktree });
     }
     await runCapturePipeline(job);
-    await buildDevQueue(job);
+    await buildDevQueue(job, { requireReviews: true });
     const gateSummary = await qaGateSummary(job);
     job.automatedGate = gateSummary.automatedGate;
     job.codexReview = gateSummary.codexReview;
@@ -308,8 +308,8 @@ async function qaGateSummary(job) {
   };
 }
 
-async function refreshReport(job, message) {
-  await buildDevQueue(job);
+async function refreshReport(job, message, options = {}) {
+  await buildDevQueue(job, options);
   await runProcessStep(job, 'report generation', message, process.execPath, ['tools/qa_generate_html_report.mjs'], {
     cwd: runnerRoot,
     env: {
@@ -324,14 +324,7 @@ async function refreshReport(job, message) {
 
 async function refreshReportAfterFailure(job) {
   try {
-    await runCommand(process.execPath, ['tools/qa_build_dev_queue.mjs'], {
-      cwd: runnerRoot,
-      env: {
-        ...process.env,
-        QA_REPORT_DIR: job.reportDir,
-        QA_SCREENSHOT_DIR: job.screenshotDir,
-      },
-    });
+    await runDevQueueCommand(job);
     await runCommand(
       process.execPath,
       ['tools/qa_generate_html_report.mjs'],
@@ -351,13 +344,22 @@ async function refreshReportAfterFailure(job) {
   }
 }
 
-async function buildDevQueue(job) {
+async function buildDevQueue(job, options = {}) {
   const productReview = await readJsonIfExists(join(job.reportDir, 'codex_product_review.json'));
   const playthroughReview = await readJsonIfExists(join(job.reportDir, 'codex_playthrough_review.json'));
-  if (!productReview || !playthroughReview) {
-    return;
+  const missingReviewFiles = [];
+  if (!productReview) missingReviewFiles.push(join(job.reportDir, 'codex_product_review.json'));
+  if (!playthroughReview) missingReviewFiles.push(join(job.reportDir, 'codex_playthrough_review.json'));
+  if (missingReviewFiles.length > 0) {
+    if (!options.requireReviews) return false;
+    throw new Error(`dev_queue/regression_lock 생성 불가: review 산출물이 없습니다 (${missingReviewFiles.join(', ')})`);
   }
-  await runProcessStep(job, 'dev queue', 'dev_queue/regression_lock 생성', process.execPath, ['tools/qa_build_dev_queue.mjs'], {
+  await runDevQueueCommand(job, true);
+  return true;
+}
+
+async function runDevQueueCommand(job, asProcessStep = false) {
+  const options = {
     cwd: runnerRoot,
     env: {
       ...process.env,
@@ -368,7 +370,12 @@ async function buildDevQueue(job) {
       QA_DEV_QUEUE_PATH: join(job.reportDir, 'dev_queue.json'),
       QA_REGRESSION_LOCK_PATH: join(job.reportDir, 'regression_lock.json'),
     },
-  });
+  };
+  if (asProcessStep) {
+    await runProcessStep(job, 'dev queue', 'dev_queue/regression_lock 생성', process.execPath, ['tools/qa_build_dev_queue.mjs'], options);
+    return;
+  }
+  await runCommand(process.execPath, ['tools/qa_build_dev_queue.mjs'], options);
 }
 
 async function runProcessStep(job, phase, message, command, args, options = {}) {

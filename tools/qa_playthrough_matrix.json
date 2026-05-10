@@ -1,0 +1,123 @@
+{
+  "version": 1,
+  "qualityBar": "docs/qa/playthrough_bar.md",
+  "requiredScoreKeys": [
+    "dialogue_flow",
+    "choice_consequence",
+    "emotional_continuity",
+    "ending_payoff",
+    "world_consistency",
+    "player_comprehension",
+    "copy_polish"
+  ],
+  "flows": [
+    {
+      "id": "first_time_flow",
+      "title": "첫 시작 흐름",
+      "fastQaGroup": "onboarding",
+      "steps": ["start", "first_start_prologue", "base_status", "outing"],
+      "riskTags": ["scenario", "copy", "ux"],
+      "acceptanceCriteria": [
+        "새 게임 시작, 첫 대화, 거점 진입, 첫 외출의 동기가 플레이 순서대로 이해되어야 한다.",
+        "CTA와 대화 문구가 다음 행동을 자연스럽게 유도해야 한다."
+      ],
+      "requiredEvidence": [
+        "start CTA review",
+        "prologue transcript",
+        "base status next-action review",
+        "first outing CTA review"
+      ]
+    },
+    {
+      "id": "first_report_flow",
+      "title": "첫 보고와 선택 결과 흐름",
+      "fastQaGroup": "event",
+      "steps": ["absence_report", "report_detail_top", "report_detail_middle", "report_detail_choices", "event_choice_enabled", "result", "return_recovery"],
+      "riskTags": ["event", "scenario", "continuity", "ux"],
+      "acceptanceCriteria": [
+        "보고 요약, 상세 설명, 선택지, 결과, 복귀 회복이 서로 다른 역할의 문구를 가져야 한다.",
+        "선택지 라벨과 결과/후속 문구가 감정적으로 연결되어야 한다."
+      ],
+      "requiredEvidence": [
+        "report summary/detail comparison",
+        "choice label/result relation",
+        "follow-up copy review",
+        "resource/state continuity review"
+      ]
+    },
+    {
+      "id": "archive_flow",
+      "title": "저장고 기록 흐름",
+      "fastQaGroup": "archive",
+      "steps": ["report_archive_empty", "report_archive_list", "report_archive_detail"],
+      "riskTags": ["copy", "event", "continuity", "ux"],
+      "acceptanceCriteria": [
+        "저장고 empty/list/detail 상태가 명칭 회귀 없이 같은 기록 체계를 설명해야 한다.",
+        "목록과 상세가 filler처럼 보이지 않고 처리한 사건을 다시 읽는 가치가 있어야 한다."
+      ],
+      "requiredEvidence": [
+        "empty state copy review",
+        "list item density review",
+        "detail transcript review",
+        "SSoT naming check"
+      ]
+    },
+    {
+      "id": "ending_cycle1_flow",
+      "title": "1회차 엔딩 흐름",
+      "fastQaGroup": "ending",
+      "steps": ["ending_cycle1"],
+      "riskTags": ["ending", "scenario", "continuity"],
+      "acceptanceCriteria": [
+        "1회차 엔딩이 첫 플레이의 결산과 다음 회차의 기대를 제공해야 한다.",
+        "해금/방문자/가디언 후일담이 목록 나열이 아니라 보상처럼 읽혀야 한다."
+      ],
+      "requiredEvidence": ["cycle 1 ending transcript", "next-cycle CTA clarity", "ending payoff review", "portrait crop check", "resource badge clarity check", "lock/unlock state clarity check"]
+    },
+    {
+      "id": "ending_cycle2_flow",
+      "title": "2회차 엔딩 흐름",
+      "fastQaGroup": "ending",
+      "steps": ["ending_cycle2"],
+      "riskTags": ["ending", "scenario", "continuity"],
+      "acceptanceCriteria": [
+        "2회차 엔딩은 1회차와 다른 누적 의미와 방문자/가디언 변화를 보여야 한다.",
+        "회차별 해금 상태가 한국어로 자연스럽게 설명되어야 한다."
+      ],
+      "requiredEvidence": ["cycle 2 ending transcript", "cycle differentiation review", "visitor/guardian epilogue review", "portrait crop check", "resource badge clarity check", "lock/unlock state clarity check"]
+    },
+    {
+      "id": "ending_cycle3_flow",
+      "title": "3회차 엔딩 흐름",
+      "fastQaGroup": "ending",
+      "steps": ["ending_cycle3"],
+      "riskTags": ["ending", "scenario", "continuity"],
+      "acceptanceCriteria": [
+        "3회차 엔딩은 누적 결산과 특수 계약/다음 목표를 명확히 제시해야 한다.",
+        "정보 밀도가 높아도 플레이의 마무리로 읽혀야 한다."
+      ],
+      "requiredEvidence": ["cycle 3 ending transcript", "special-contract teaser review", "final payoff review", "portrait crop check", "resource badge clarity check", "lock/unlock state clarity check"]
+    },
+    {
+      "id": "user_regression_flow",
+      "title": "사용자 지적 회귀 흐름",
+      "fastQaGroup": "regression",
+      "steps": ["start", "base_status", "guardian_dialog", "location_dialog", "outing"],
+      "riskTags": ["visual", "copy", "ux", "continuity"],
+      "acceptanceCriteria": [
+        "사용자가 지적한 CTA 중첩, 흰 배경 아이콘, 불명확한 문구, raw 수치, 기본 선택지 UI가 다시 나타나면 FAIL이다.",
+        "PASS 판정은 원본 크기 확대 확인과 구체적 근거가 있을 때만 가능하다.",
+        "영어 템플릿 문장이나 placeholder transcript만으로는 PASS할 수 없다."
+      ],
+      "requiredEvidence": [
+        "final_02_start CTA surface review",
+        "final_04_base_status record chip review",
+        "final_09_guardian_dialog copy review",
+        "final_10_location_dialog raw value/default UI review",
+        "final_11_outing return CTA review",
+        "실제 화면 문구가 포함된 한국어 transcript",
+        "generic PASS 문구 부재"
+      ]
+    }
+  ]
+}

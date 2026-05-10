@@ -6,7 +6,7 @@ import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
 const dashboardUrl = (process.env.QA_DASHBOARD_URL ?? 'http://127.0.0.1:64700').replace(/\/$/, '');
-const canonicalRunnerRoot = resolve(process.env.QA_CANONICAL_RUNNER_ROOT ?? '/Users/euna/Developer/Dragonout-qa-runner');
+const canonicalRunnerRoot = resolve(process.env.QA_CANONICAL_RUNNER_ROOT ?? '/Users/euna/Developer/QA-Dragonout');
 const command = process.argv[2] ?? 'status';
 const args = process.argv.slice(3);
 

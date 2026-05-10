@@ -181,6 +181,7 @@ try {
       );
       await writeFile(outputPath, screenshot.data, 'base64');
       const fileStat = await stat(outputPath);
+      const domMeta = await captureDomMeta(client).catch(() => null);
       results.push({
         id,
         qaScreen,
@@ -192,6 +193,7 @@ try {
         bytes: fileStat.size,
         mtime: fileStat.mtime.toISOString(),
         cacheKey,
+        ...(domMeta ? { domMeta } : {}),
       });
       captureCache.entries ??= {};
       captureCache.entries[id] = {
@@ -352,4 +354,33 @@ async function readCache(path) {
   } catch {
     return { entries: {} };
   }
+}
+
+async function captureDomMeta(client) {
+  const lockUnlockKeywords = ['lock', 'unlock', '잠김', '해금', '잠금', '해제'];
+  const result = await client.send('Runtime.evaluate', {
+    expression: `
+      (() => {
+        const truncate = (s, n) => s ? s.slice(0, n) : '';
+        const visibleText = truncate(document.body?.innerText ?? '', 200)
+          .split('\\n').map(s => s.trim()).filter(Boolean).slice(0, 20);
+        const buttonLabels = [...document.querySelectorAll('button,[role="button"]')]
+          .map(el => truncate(el.textContent?.trim() ?? '', 60))
+          .filter(Boolean).slice(0, 20);
+        const imgSrcs = [...document.querySelectorAll('img')]
+          .map(el => el.src || el.getAttribute('src') || '')
+          .filter(Boolean).slice(0, 20);
+        const ariaLabels = [...document.querySelectorAll('[aria-label]')]
+          .map(el => truncate(el.getAttribute('aria-label') ?? '', 60))
+          .filter(Boolean).slice(0, 20);
+        const keywords = ${JSON.stringify(lockUnlockKeywords)};
+        const allText = document.body?.innerText ?? '';
+        const lockUnlockHints = keywords.filter(k => allText.toLowerCase().includes(k.toLowerCase()));
+        return { visibleText, buttonLabels, imgSrcs, ariaLabels, lockUnlockHints };
+      })()
+    `,
+    returnByValue: true,
+    timeout: 3000,
+  });
+  return result?.result?.value ?? null;
 }

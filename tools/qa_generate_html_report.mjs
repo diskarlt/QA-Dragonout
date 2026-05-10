@@ -356,6 +356,12 @@ function renderBody() {
     </section>
 
     <section>
+      <h2>캘리브레이션 accepted 개발 후보</h2>
+      <p class="section-note">사용자가 accepted한 후보와 학습된 QA 규칙 목록입니다. 이 규칙들이 repo-tracked 고정 룰로 승격되면 수정 큐에 반영됩니다.</p>
+      ${renderAcceptedCandidateSection()}
+    </section>
+
+    <section>
       <h2>Commercial Product QA Gate</h2>
       <p><strong>${finalStatus === 'PASS' ? '최종 상태: PASS' : finalStatus === '부분 검수 완료' ? '최종 상태: 부분 검수 완료' : '최종 상태: QA 미통과'}</strong></p>
       <p>${finalStatus === 'PASS' ? 'Codex visual/product review completed. Codex playthrough review completed. 모든 화면과 플레이 흐름이 commercial_ready입니다.' : `${codexGate.label}. 자동 검사 또는 Codex 제품 검수 단계에서 하나 이상의 화면 또는 흐름이 상업용 제품 QA 기준을 통과하지 못했거나 부분 검수입니다.`}</p>
@@ -1137,6 +1143,19 @@ function renderCandidateScreenshot(candidate) {
     return escapeHtml(candidate.target_label ?? candidate.target_id ?? '');
   }
   return `<a href="${escapeHtml(candidate.screenshot)}" target="_blank"><img class="thumb" src="${escapeHtml(candidate.screenshot)}" alt="${escapeHtml(candidate.candidate_id)}"></a><br><span class="muted">${escapeHtml(candidate.target_label ?? candidate.target_id)}</span>`;
+}
+
+function renderAcceptedCandidateSection() {
+  if (acceptedCalibrationCandidates.length === 0) {
+    return '<p class="muted">accepted 후보가 없습니다.</p>';
+  }
+  const items = acceptedCalibrationCandidates.map((candidate) => {
+    const rules = (candidate.learned_rules ?? [])
+      .map((rule) => `<li><strong>${escapeHtml(rule.rule_id)}</strong>: ${escapeHtml(rule.assertion)}</li>`)
+      .join('');
+    return `<li>${escapeHtml(candidate.candidate_id)} ${escapeHtml(candidate.target_label ?? '')}: ${escapeHtml(candidate.suggested_fix ?? '')}${rules ? `<ul>${rules}</ul>` : ''}</li>`;
+  });
+  return `<ul>${items.join('')}</ul>`;
 }
 
 function acceptedCalibrationQueue(type) {

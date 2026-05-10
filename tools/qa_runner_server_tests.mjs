@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
@@ -19,6 +19,9 @@ const server = spawn(process.execPath, ['tools/qa_runner_server.mjs'], {
     QA_REPORT_DIR: reportDir,
     QA_SCREENSHOT_DIR: screenshotDir,
     QA_CANONICAL_RUNNER_ROOT: process.cwd(),
+    QA_MATRIX_PATH: join(process.cwd(), 'tools/qa_matrix_test_fixture.json'),
+    QA_PLAYTHROUGH_MATRIX_PATH: join(process.cwd(), 'tools/qa_playthrough_matrix_test_fixture.json'),
+    QA_FIXED_RULES_PATH: join(process.cwd(), 'tools/qa_fixed_rules_test_fixture.json'),
   },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
@@ -32,6 +35,7 @@ server.stderr.on('data', (chunk) => {
 });
 
 try {
+  await mkdir(screenshotDir, { recursive: true });
   await waitForServer(port);
 
   const status = await getJson('/api/status');

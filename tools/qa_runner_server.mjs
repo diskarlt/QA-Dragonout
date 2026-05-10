@@ -7,7 +7,7 @@ import { extname, join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 
 const runnerRoot = resolve(process.cwd());
-const canonicalRunnerRoot = resolve(process.env.QA_CANONICAL_RUNNER_ROOT ?? '/Users/euna/Developer/Dragonout-qa-runner');
+const canonicalRunnerRoot = resolve(process.env.QA_CANONICAL_RUNNER_ROOT ?? '/Users/euna/Developer/QA-Dragonout');
 const defaultTarget = process.env.QA_TARGET_WORKTREE ?? '/Users/euna/Developer/Dragonout';
 const defaultReportDir = resolve(process.env.QA_REPORT_DIR ?? join(runnerRoot, 'reports/current'));
 const defaultScreenshotDir = resolve(process.env.QA_SCREENSHOT_DIR ?? join(defaultReportDir, 'screenshots'));
@@ -1567,7 +1567,7 @@ function validateReportDir(input) {
     target.startsWith(`${runnerRoot}/`) ||
     target.startsWith(`${allowedRoot}/Dragonout`) ||
     target.startsWith(`${allowedRoot}/Dragonout-task-`) ||
-    target.startsWith(`${allowedRoot}/Dragonout-qa-runner/reports/`);
+    target.startsWith(`${allowedRoot}/QA-Dragonout/reports/`);
   if (!allowed) {
     throw new Error(`report dir is outside allowlist: ${target}`);
   }

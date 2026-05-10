@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "viewport": { "width": 390, "height": 844 },
+  "screens": [
+    {
+      "id": "test_start",
+      "screen": "Start",
+      "state": "새 게임 시작",
+      "qaScreen": "start",
+      "screenshot": "test_start.png",
+      "fastQaGroup": "base",
+      "waitMs": 500,
+      "contractChecks": ["visual", "copy"],
+      "failIfMissing": ["visual"],
+      "failIfPresent": [],
+      "expected": ["시작 화면이 보인다"],
+      "forbidden": []
+    }
+  ]
+}

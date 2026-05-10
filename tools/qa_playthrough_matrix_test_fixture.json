@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "qualityBar": "",
+  "requiredScoreKeys": ["dialogue_flow", "copy_polish"],
+  "flows": [
+    {
+      "id": "test_flow",
+      "title": "테스트 흐름",
+      "fastQaGroup": "base",
+      "steps": ["test_start"],
+      "riskTags": [],
+      "acceptanceCriteria": ["시작 화면이 보인다."],
+      "requiredEvidence": ["start CTA review"]
+    }
+  ]
+}

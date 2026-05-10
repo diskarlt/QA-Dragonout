@@ -51,8 +51,17 @@ for (const screen of matrix.screens) {
     } else if (metrics.largest_bright_block_ratio > 0.022) {
       findings.push(finding('P2', 'bright_badge_candidate', '작은 흰색 배지 또는 비트맵 배경 후보가 있습니다.'));
     }
+    if (metrics.largest_bright_block_ratio > 0.018 && metrics.bright_low_saturation_ratio > 0.06) {
+      findings.push(finding('P1', 'white_bitmap_badge', '흰 비트맵 배지 후보가 감지됐습니다. HUD 톤과 분리된 밝은 배지 배경을 확인하세요.'));
+    }
     if (metrics.bright_low_saturation_ratio > 0.12) {
       findings.push(finding('P2', 'bright_low_saturation_noise', '밝은 저채도 영역이 많아 UI 톤 불일치 후보입니다.'));
+    }
+    if (metrics.bright_low_saturation_ratio > 0.08 && metrics.edge_noise > 0.12) {
+      findings.push(finding('P2', 'resource_badge_cluster_density', '자원/배지 군집 밀도가 높아 배지 과밀 후보입니다.'));
+    }
+    if (metrics.edge_noise > 0.165 && metrics.bright_low_saturation_ratio > 0.09) {
+      findings.push(finding('P2', 'badge_overdensity', '배지/수치 과밀로 화면 가독성이 낮을 수 있습니다.'));
     }
     if (metrics.edge_noise > 0.185 && metrics.average_saturation < 0.24) {
       findings.push(finding('P2', 'muddy_dense_texture', '어두운 저채도 텍스처와 엣지가 많아 화면이 탁해 보일 수 있습니다.'));

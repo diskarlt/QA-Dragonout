@@ -1,0 +1,401 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{title}}</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #130d10;
+      --panel: #211419;
+      --panel-2: #2d1d22;
+      --text: #f7ebd1;
+      --muted: #c9ad84;
+      --gold: #dfb86f;
+      --green: #7fd29b;
+      --red: #ff7b72;
+      --amber: #e5b567;
+      --line: rgba(223, 184, 111, 0.34);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+    }
+    header {
+      padding: 28px 32px 18px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(180deg, #24151b, #130d10);
+    }
+    h1, h2, h3 { margin: 0; letter-spacing: 0; }
+    h1 { font-size: 28px; }
+    h2 { margin-top: 34px; font-size: 20px; color: var(--gold); }
+    main { max-width: 1480px; margin: 0 auto; padding: 24px 24px 60px; }
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+      margin-top: 18px;
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px 16px;
+    }
+    .label { color: var(--muted); font-size: 12px; font-weight: 700; }
+    .value { margin-top: 4px; font-size: 20px; font-weight: 900; }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      padding: 2px 9px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 900;
+      border: 1px solid currentColor;
+    }
+    .pass { color: var(--green); }
+    .fail { color: var(--red); }
+    .low { color: var(--amber); }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 12px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+    }
+    th, td {
+      vertical-align: top;
+      border-bottom: 1px solid rgba(223, 184, 111, 0.18);
+      padding: 10px;
+      text-align: left;
+    }
+    th {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      background: #2a1a20;
+      color: var(--gold);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    td { font-size: 13px; }
+    .thumb {
+      width: 128px;
+      border-radius: 4px;
+      border: 1px solid var(--line);
+      display: block;
+    }
+    .scores {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(88px, 1fr));
+      gap: 3px 8px;
+      min-width: 220px;
+    }
+    .score-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      color: var(--muted);
+    }
+    .score-row strong { color: var(--text); }
+    ul { margin: 0; padding-left: 18px; }
+    .muted { color: var(--muted); }
+    .section-note { color: var(--muted); margin-top: 6px; }
+    .queue {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 12px;
+      margin-top: 12px;
+    }
+    .queue .card { background: var(--panel-2); }
+    .priority-queue .card {
+      border-color: rgba(127, 210, 155, 0.52);
+      background: #1d1a17;
+    }
+    .rule-queue {
+      display: grid;
+      gap: 10px;
+      margin-top: 8px;
+    }
+    .rule-finding {
+      border: 1px solid rgba(223, 184, 111, 0.22);
+      border-radius: 6px;
+      padding: 10px;
+      background: #160f13;
+    }
+    .rule-finding p { margin: 6px 0 0; }
+    .rule-finding-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: flex-start;
+    }
+    .contract-summary {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(92px, 1fr));
+      gap: 6px;
+      margin: 4px 0 8px;
+    }
+    .contract-count {
+      border: 1px solid currentColor;
+      border-radius: 6px;
+      padding: 5px 7px;
+      font-weight: 900;
+      background: rgba(19, 13, 16, 0.7);
+    }
+    .contract-count b {
+      display: block;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .contract-badge {
+      display: inline-flex;
+      align-items: center;
+      min-height: 21px;
+      padding: 1px 7px;
+      border: 1px solid currentColor;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 900;
+      margin-right: 4px;
+      white-space: nowrap;
+    }
+    .qa-matrix-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 16px;
+      margin-top: 14px;
+    }
+    .qa-card {
+      display: grid;
+      grid-template-columns: 160px minmax(0, 1fr);
+      gap: 16px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 16px;
+      min-width: 0;
+    }
+    .qa-card.fail { border-color: rgba(255, 123, 114, 0.72); background: #251318; }
+    .qa-card.low { border-color: rgba(229, 181, 103, 0.72); background: #231b13; }
+    .qa-card.pass { border-color: rgba(127, 210, 155, 0.42); }
+    .qa-card-media { display: block; min-width: 0; }
+    .qa-card-main { min-width: 0; }
+    .qa-card-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+      margin-bottom: 8px;
+    }
+    .qa-card-head h3 { font-size: 17px; }
+    .qa-card-head p { margin: 4px 0 0; }
+    .qa-card-meta {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 6px;
+      margin: 8px 0;
+    }
+    .qa-card-columns {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .qa-card-section {
+      border: 1px solid rgba(223, 184, 111, 0.18);
+      border-radius: 6px;
+      background: rgba(19, 13, 16, 0.52);
+      padding: 10px;
+      margin-top: 10px;
+      min-width: 0;
+    }
+    .qa-card-section h4 {
+      margin: 0 0 8px;
+      color: var(--gold);
+      font-size: 12px;
+    }
+    .qa-flow-thumb {
+      min-height: 160px;
+      border: 1px dashed var(--line);
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      color: var(--muted);
+      padding: 10px;
+    }
+    .qa-judgement-list {
+      display: grid;
+      gap: 8px;
+    }
+    .qa-judgement-card {
+      border: 1px solid rgba(223, 184, 111, 0.22);
+      border-radius: 6px;
+      padding: 10px;
+      background: #160f13;
+    }
+    .qa-judgement-card.fail { border-color: rgba(255, 123, 114, 0.48); }
+    .qa-judgement-card.low { border-color: rgba(229, 181, 103, 0.48); }
+    .judgement-fields {
+      display: grid;
+      gap: 3px;
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .judgement-fields b { color: var(--gold); }
+    details { margin-top: 8px; }
+    summary { color: var(--gold); cursor: pointer; font-weight: 800; }
+    td, li, .card, .contract-count, .rule-finding { overflow-wrap: anywhere; word-break: keep-all; }
+    .qa-card, .qa-card-section, .qa-judgement-card { overflow-wrap: anywhere; word-break: keep-all; }
+    @media (max-width: 760px) {
+      main { padding: 18px 14px 48px; }
+      .qa-card { grid-template-columns: 1fr; }
+      .qa-card-columns { grid-template-columns: 1fr; }
+      .thumb { width: min(180px, 100%); }
+    }
+    button, select, textarea {
+      font: inherit;
+      color: var(--text);
+      background: #160f13;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+    button {
+      min-height: 38px;
+      padding: 8px 14px;
+      font-weight: 900;
+      cursor: pointer;
+    }
+    button:hover { border-color: var(--gold); }
+    button:disabled { opacity: 0.55; cursor: wait; }
+    select { min-height: 36px; padding: 6px 10px; }
+    textarea {
+      width: 100%;
+      min-height: 82px;
+      padding: 10px;
+      resize: vertical;
+    }
+    .calibration-actions {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px;
+      margin-top: 12px;
+    }
+    .calibration-json-output {
+      margin-top: 10px;
+      min-height: 130px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 12px;
+    }
+    .calibration-form {
+      display: grid;
+      gap: 14px;
+      margin-top: 14px;
+    }
+    .calibration-card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 16px;
+    }
+    .calibration-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-start;
+      border-bottom: 1px solid rgba(223, 184, 111, 0.18);
+      padding-bottom: 10px;
+    }
+    .calibration-head h3 {
+      margin-top: 2px;
+      font-size: 18px;
+      color: var(--gold);
+    }
+    .calibration-grid {
+      display: grid;
+      grid-template-columns: minmax(150px, 220px) minmax(0, 1fr);
+      gap: 16px;
+      margin-top: 12px;
+    }
+    .calibration-card h4 {
+      margin: 12px 0 4px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .calibration-card p { margin: 0 0 8px; }
+    .calibration-options {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px 16px;
+      margin: 12px 0;
+      padding: 12px;
+      border: 1px solid rgba(223, 184, 111, 0.22);
+      border-radius: 8px;
+    }
+    .calibration-options legend {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 900;
+    }
+    .calibration-options label {
+      display: inline-flex;
+      gap: 6px;
+      align-items: center;
+      min-height: 28px;
+    }
+    .calibration-field {
+      display: grid;
+      gap: 6px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 900;
+      margin-top: 10px;
+    }
+    .calibration-field textarea,
+    .calibration-field select {
+      color: var(--text);
+      font-size: 14px;
+      font-weight: 400;
+    }
+    .calibration-rewrite-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .calibration-priority { max-width: 220px; }
+    @media (max-width: 760px) {
+      .calibration-head, .calibration-grid, .calibration-rewrite-grid {
+        grid-template-columns: 1fr;
+        display: grid;
+      }
+      .calibration-head { display: grid; }
+      .thumb { width: 100%; max-width: 180px; }
+    }
+  </style>
+</head>
+<body>
+  <script id="qa-report-payload" type="application/json">{{payload}}</script>
+  {{body}}
+  <script>
+    (() => {
+      const payloadElement = document.getElementById('qa-report-payload');
+      if (!payloadElement) return;
+      const payload = JSON.parse(payloadElement.textContent || '{}');
+      const live = payload.live_status || {};
+      if (live.status && live.status !== 'complete') {
+        window.setTimeout(() => window.location.reload(), live.refresh_ms || 7000);
+      }
+    })();
+  </script>
+</body>
+</html>

@@ -277,6 +277,46 @@ async function validateScreenArtifacts() {
         errors.push(`screen artifact ${screen.id} guardian facet requires qa_matrix expectedCharacters.`);
       }
     }
+
+    const validStatuses = new Set(['captured', 'partial', 'failed']);
+    if (artifact.status !== undefined && !validStatuses.has(artifact.status)) {
+      errors.push(`screen artifact ${screen.id} invalid status: "${artifact.status}"`);
+    }
+    const validQualities = new Set(['captured', 'partial', 'stub', 'failed', 'test_fixture']);
+    if (artifact.metadataQuality !== undefined && !validQualities.has(artifact.metadataQuality)) {
+      errors.push(`screen artifact ${screen.id} invalid metadataQuality: "${artifact.metadataQuality}"`);
+    }
+
+    const p0ScreenIds = new Set([
+      'start', 'base_status', 'guardian_dialog', 'location_dialog', 'outing',
+      'absence_report', 'report_detail_top', 'event_choice_enabled', 'event_choice_disabled',
+      'result', 'return_recovery', 'ending_cycle1',
+    ]);
+    if (
+      p0ScreenIds.has(screen.id) &&
+      artifact.metadataQuality === 'captured' &&
+      Array.isArray(artifact.visibleText) &&
+      artifact.visibleText.length === 0
+    ) {
+      errors.push(`screen artifact ${screen.id} claims metadataQuality=captured but visibleText is empty.`);
+    }
+
+    if (Array.isArray(artifact.renderedGuardians) && artifact.renderedGuardians.length > 0) {
+      for (const g of artifact.renderedGuardians) {
+        if (!g.guardianId) errors.push(`screen artifact ${screen.id} renderedGuardians entry missing guardianId.`);
+        if (!g.displayName) errors.push(`screen artifact ${screen.id} renderedGuardians entry missing displayName.`);
+        if (g.portraitAssetId === undefined && g.semanticId === undefined) {
+          errors.push(`screen artifact ${screen.id} renderedGuardians entry missing portraitAssetId/semanticId.`);
+        }
+      }
+    }
+
+    if (Array.isArray(artifact.primaryCtas) && artifact.primaryCtas.length > 0) {
+      for (const cta of artifact.primaryCtas) {
+        if (typeof cta.label !== 'string') errors.push(`screen artifact ${screen.id} primaryCtas entry missing label string.`);
+        if (typeof cta.enabled !== 'boolean') errors.push(`screen artifact ${screen.id} primaryCtas entry missing enabled boolean.`);
+      }
+    }
   }
 }
 

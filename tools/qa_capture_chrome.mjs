@@ -227,6 +227,7 @@ try {
     await writeFile(cachePath, `${JSON.stringify(captureCache, null, 2)}\n`).catch(() => {});
   }
   await writeCaptureResult().catch(() => {});
+  await writeScreenArtifacts().catch(() => {});
   updateLiveReport('running', 'capture', `캡처 결과 저장: ${results.length}/${targets.length}`, results.length, targets.length);
 }
 
@@ -361,26 +362,220 @@ async function captureDomMeta(client) {
   const result = await client.send('Runtime.evaluate', {
     expression: `
       (() => {
-        const truncate = (s, n) => s ? s.slice(0, n) : '';
-        const visibleText = truncate(document.body?.innerText ?? '', 200)
-          .split('\\n').map(s => s.trim()).filter(Boolean).slice(0, 20);
-        const buttonLabels = [...document.querySelectorAll('button,[role="button"]')]
-          .map(el => truncate(el.textContent?.trim() ?? '', 60))
-          .filter(Boolean).slice(0, 20);
+        const visibleText = (document.body?.innerText ?? '')
+          .split('\\n').map(s => s.trim()).filter(Boolean).slice(0, 200);
+
+        const ctaEls = [...document.querySelectorAll('button,[role="button"],[role="link"]')];
+        const primaryCtas = ctaEls.slice(0, 30).map(el => {
+          const rect = el.getBoundingClientRect();
+          const label = (el.textContent?.trim() ?? el.getAttribute('aria-label') ?? '').slice(0, 80);
+          const disabled = el.disabled || el.getAttribute('aria-disabled') === 'true' || el.hasAttribute('disabled');
+          const disabledReason = disabled
+            ? (el.getAttribute('data-disabled-reason') ?? el.getAttribute('aria-describedby') ?? null)
+            : null;
+          const action = el.getAttribute('data-action') ?? el.getAttribute('href') ?? el.getAttribute('data-route') ?? null;
+          const semanticRole = el.getAttribute('role') ?? (el.tagName === 'BUTTON' ? 'button' : 'link');
+          return {
+            label,
+            enabled: !disabled,
+            action,
+            bounds: { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) },
+            semanticRole,
+            disabledReason,
+          };
+        }).filter(cta => cta.label || cta.action);
+
+        const qaSnapshot = window.__QA_SNAPSHOT__ ?? null;
+
+        const guardianEls = [...document.querySelectorAll('[data-guardian-id],[data-character-id]')];
+        const ariaGuardians = guardianEls.slice(0, 10).map(el => {
+          const rect = el.getBoundingClientRect();
+          return {
+            guardianId: el.getAttribute('data-guardian-id') ?? el.getAttribute('data-character-id'),
+            displayName: (el.getAttribute('aria-label') ?? el.textContent?.trim() ?? '').slice(0, 40),
+            semanticId: el.getAttribute('data-portrait-asset') ?? el.getAttribute('data-guardian-id') ?? null,
+            state: el.getAttribute('data-state') ?? 'unknown',
+            bounds: { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) },
+            visible: rect.width > 0 && rect.height > 0,
+            evidence: 'aria_dom',
+          };
+        });
+
+        const locationEls = [...document.querySelectorAll('[data-location-id]')];
+        const ariaLocations = locationEls.slice(0, 10).map(el => {
+          const rect = el.getBoundingClientRect();
+          return {
+            locationId: el.getAttribute('data-location-id'),
+            displayName: (el.getAttribute('aria-label') ?? el.textContent?.trim() ?? '').slice(0, 40),
+            stability: el.getAttribute('data-stability') ?? 'unknown',
+            narrativeState: el.getAttribute('data-narrative-state') ?? '',
+            bounds: { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) },
+            visible: rect.width > 0 && rect.height > 0,
+            evidence: 'aria_dom',
+          };
+        });
+
         const imgSrcs = [...document.querySelectorAll('img')]
           .map(el => el.src || el.getAttribute('src') || '')
-          .filter(Boolean).slice(0, 20);
+          .filter(Boolean).slice(0, 30);
+
         const ariaLabels = [...document.querySelectorAll('[aria-label]')]
-          .map(el => truncate(el.getAttribute('aria-label') ?? '', 60))
-          .filter(Boolean).slice(0, 20);
-        const keywords = ${JSON.stringify(lockUnlockKeywords)};
+          .map(el => (el.getAttribute('aria-label') ?? '').trim().slice(0, 80))
+          .filter(Boolean).slice(0, 30);
+
         const allText = document.body?.innerText ?? '';
+        const keywords = ${JSON.stringify(lockUnlockKeywords)};
         const lockUnlockHints = keywords.filter(k => allText.toLowerCase().includes(k.toLowerCase()));
-        return { visibleText, buttonLabels, imgSrcs, ariaLabels, lockUnlockHints };
+
+        return { visibleText, primaryCtas, qaSnapshot, ariaGuardians, ariaLocations, imgSrcs, ariaLabels, lockUnlockHints };
       })()
     `,
     returnByValue: true,
-    timeout: 3000,
+    timeout: 5000,
   });
   return result?.result?.value ?? null;
+}
+
+function buildScreenArtifact(target, captureResult, domMeta, viewport) {
+  const { id, qaScreen, fileName: screenshot } = target;
+  const route = `/?qaScreen=${encodeURIComponent(qaScreen)}`;
+  const captureStatus = captureResult?.status;
+  const status = (captureStatus === 'captured' || captureStatus === 'skipped_cached') ? 'captured'
+    : captureStatus === 'failed' ? 'failed'
+    : 'failed';
+
+  if (!domMeta) {
+    return {
+      screen: id,
+      screenshot,
+      status,
+      metadataQuality: status === 'failed' ? 'failed' : 'stub',
+      route,
+      viewport,
+      visibleText: [],
+      primaryCtas: [],
+      renderedGuardians: [],
+      renderedLocations: [],
+      gameState: null,
+      missingEvidence: ['domMeta capture failed — visibleText, CTAs, guardians, locations all missing'],
+      source: ['capture_failed'],
+    };
+  }
+
+  const snap = domMeta.qaSnapshot ?? null;
+  const visibleText = Array.isArray(domMeta.visibleText) ? domMeta.visibleText : [];
+  const primaryCtas = Array.isArray(domMeta.primaryCtas) ? domMeta.primaryCtas : [];
+
+  let renderedGuardians = [];
+  let guardianSource = null;
+  if (snap?.guardians?.length > 0) {
+    renderedGuardians = snap.guardians.map(g => ({
+      guardianId: g.guardianId,
+      displayName: g.displayName,
+      portraitAssetId: g.portraitAssetId ?? null,
+      semanticId: g.portraitAssetId ?? g.guardianId,
+      state: g.state ?? 'unknown',
+      bounds: g.bounds ?? null,
+      visible: g.visible ?? true,
+      evidence: 'qa_snapshot',
+    }));
+    guardianSource = 'qa_snapshot';
+  } else if (domMeta.ariaGuardians?.length > 0) {
+    renderedGuardians = domMeta.ariaGuardians;
+    guardianSource = 'aria_dom';
+  }
+
+  let renderedLocations = [];
+  let locationSource = null;
+  if (snap?.locations?.length > 0) {
+    renderedLocations = snap.locations.map(l => ({
+      locationId: l.locationId,
+      displayName: l.displayName,
+      stability: l.stability ?? 'unknown',
+      narrativeState: l.narrativeState ?? '',
+      bounds: l.bounds ?? null,
+      visible: l.visible ?? true,
+      evidence: 'qa_snapshot',
+    }));
+    locationSource = 'qa_snapshot';
+  } else if (domMeta.ariaLocations?.length > 0) {
+    renderedLocations = domMeta.ariaLocations;
+    locationSource = 'aria_dom';
+  }
+
+  const gameState = snap?.gameState ?? null;
+
+  const hasText = visibleText.length > 0;
+  const hasCtaOrGuardianOrLocation = primaryCtas.length > 0 || renderedGuardians.length > 0 || renderedLocations.length > 0;
+  const hasGameState = gameState !== null;
+
+  let metadataQuality;
+  if (hasText && hasCtaOrGuardianOrLocation && hasGameState) {
+    metadataQuality = 'captured';
+  } else if (hasText || hasCtaOrGuardianOrLocation) {
+    metadataQuality = 'partial';
+  } else {
+    metadataQuality = 'stub';
+  }
+
+  const missingEvidence = [];
+  if (!hasText) missingEvidence.push('visibleText is empty — page may be canvas-rendered or innerText unavailable');
+  if (primaryCtas.length === 0) missingEvidence.push('primaryCtas is empty — no button/role=button elements found');
+  if (!snap && renderedGuardians.length === 0) missingEvidence.push('renderedGuardians missing — window.__QA_SNAPSHOT__ absent and no data-guardian-id attributes found');
+  if (!snap && renderedLocations.length === 0) missingEvidence.push('renderedLocations missing — window.__QA_SNAPSHOT__ absent and no data-location-id attributes found');
+  if (!hasGameState) missingEvidence.push('gameState null — window.__QA_SNAPSHOT__.gameState not exposed by app');
+
+  const sourceList = ['captureDomMeta'];
+  if (snap) sourceList.push('window.__QA_SNAPSHOT__');
+  if (guardianSource) sourceList.push(`guardians:${guardianSource}`);
+  if (locationSource) sourceList.push(`locations:${locationSource}`);
+
+  return {
+    screen: id,
+    screenshot,
+    status,
+    metadataQuality,
+    route,
+    viewport,
+    visibleText,
+    primaryCtas,
+    renderedGuardians,
+    renderedLocations,
+    gameState,
+    missingEvidence,
+    source: sourceList,
+  };
+}
+
+async function writeScreenArtifacts() {
+  const artifactsDir = join(reportDir, 'screen_artifacts');
+  await mkdir(artifactsDir, { recursive: true });
+
+  const resultById = new Map(results.map(r => [r.id, r]));
+  const artifacts = targets.map(target => {
+    const captureResult = resultById.get(target.id) ?? null;
+    const domMeta = captureResult?.domMeta ?? null;
+    return buildScreenArtifact(target, captureResult, domMeta, { width, height });
+  });
+
+  for (const artifact of artifacts) {
+    await writeFile(
+      join(artifactsDir, `${artifact.screen}.json`),
+      `${JSON.stringify(artifact, null, 2)}\n`,
+    );
+  }
+
+  await writeFile(
+    join(reportDir, 'screen_artifacts.json'),
+    `${JSON.stringify(
+      {
+        version: 1,
+        generated_at: new Date().toISOString(),
+        viewport: { width, height },
+        artifacts,
+      },
+      null,
+      2,
+    )}\n`,
+  );
 }

@@ -349,6 +349,89 @@ const tests = [
     },
   ],
   [
+    'all candidates decided: pending count is 0',
+    async (dir) => {
+      await makeStrictPassFixture(dir);
+      const rule = (id) => [
+        {
+          rule_id: `${id.toLowerCase().replace('-', '_')}_learned`,
+          assertion: `${id} assertion`,
+          current_observation: `${id} 관찰`,
+          pass_criteria: `${id} 통과`,
+          severity: 'P1',
+          source: 'calibration',
+        },
+      ];
+      for (const id of ['CAL-S01', 'CAL-S02', 'CAL-S03', 'CAL-S05', 'CAL-F02', 'CAL-G01']) {
+        await setCalibrationStatus(dir, id, 'accepted', rule(id));
+      }
+      await setCalibrationStatus(dir, 'CAL-F01', 'needs_rewrite');
+      for (const id of ['CAL-S04', 'CAL-F03', 'CAL-F04', 'CAL-F05']) {
+        await setCalibrationStatus(dir, id, 'deferred');
+      }
+      generateReport(dir, { mode: 'full', expect: 'not_pass' });
+      const calibHtml = await readFile(join(dir, 'calibration.html'), 'utf8');
+      if (calibHtml.includes('"pending_count":11')) {
+        throw new Error('expected pending_count to be 0 after all decisions made');
+      }
+    },
+  ],
+  [
+    'deferred candidate without required_artifact fails validation',
+    async (dir) => {
+      await makeStrictPassFixture(dir);
+      const candidatesPath = join(dir, 'qa_calibration_candidates.json');
+      const profilePath = join(dir, 'qa_calibration_profile.json');
+      const candidates = JSON.parse(await readFile(candidatesPath, 'utf8'));
+      for (const c of candidates.candidates ?? []) {
+        if (c.candidate_id === 'CAL-S04') c.calibration_status = 'deferred';
+      }
+      await writeJson(candidatesPath, candidates);
+      const profile = JSON.parse(await readFile(profilePath, 'utf8'));
+      profile.deferred = {
+        'CAL-S04': {
+          reason: '미완성',
+          required_artifact: '',
+          recheck_after: '나중에',
+          owner_next_action: '재검토',
+        },
+      };
+      await writeJson(profilePath, profile);
+      generateReport(dir, { mode: 'full', expect: 'not_pass' });
+      expectFail(dir, 'deferred calibration candidate CAL-S04 must have required_artifact field', { expect: 'not_pass' });
+    },
+  ],
+  [
+    'accepted_after_rewrite candidate missing rewrites entry fails',
+    async (dir) => {
+      await makeStrictPassFixture(dir);
+      await setCalibrationStatus(dir, 'CAL-S01', 'accepted', sampleRules('CAL-S01'));
+      const profilePath = join(dir, 'qa_calibration_profile.json');
+      const profile = JSON.parse(await readFile(profilePath, 'utf8'));
+      profile.accepted_after_rewrite = ['CAL-S01'];
+      if (profile.rewrites) delete profile.rewrites['CAL-S01'];
+      await writeJson(profilePath, profile);
+      generateReport(dir, { mode: 'full', expect: 'not_pass' });
+      expectFail(dir, 'accepted_after_rewrite candidate CAL-S01 must have a rewrites entry', { expect: 'not_pass' });
+    },
+  ],
+  [
+    'candidate in both accepted and needs_rewrite fails validation',
+    async (dir) => {
+      await makeStrictPassFixture(dir);
+      await setCalibrationStatus(dir, 'CAL-F01', 'accepted', sampleRules('CAL-F01'));
+      const profilePath = join(dir, 'qa_calibration_profile.json');
+      const profile = JSON.parse(await readFile(profilePath, 'utf8'));
+      profile.needs_rewrite = {
+        ...(profile.needs_rewrite && !Array.isArray(profile.needs_rewrite) ? profile.needs_rewrite : {}),
+        'CAL-F01': '재작성 필요',
+      };
+      await writeJson(profilePath, profile);
+      generateReport(dir, { mode: 'full', expect: 'not_pass' });
+      expectFail(dir, 'cannot be in both accepted and needs_rewrite', { expect: 'not_pass' });
+    },
+  ],
+  [
     'CAL-S02 fixed QA rules are extracted as regression findings',
     async (dir) => {
       await makeStrictPassFixture(dir);

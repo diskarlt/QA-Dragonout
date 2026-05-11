@@ -55,7 +55,9 @@ const lintById = new Map((lints.results ?? []).map((result) => [result.id, resul
 const qualityAxes = matrix.qualityStandard?.scoreKeys ?? scoreKeys();
 const now = new Date().toISOString();
 const screenArtifacts = await ensureScreenArtifacts();
-const artifactById = new Map((screenArtifacts.screens ?? []).map((artifact) => [artifact.screen, artifact]));
+const artifactById = new Map(
+  ((screenArtifacts.artifacts ?? screenArtifacts.screens) ?? []).map((artifact) => [artifact.screen, artifact]),
+);
 
 const candidates = buildCalibrationCandidates(profile);
 const fixedRules = normalizeFixedRules(fixedRulesDoc);
@@ -1193,45 +1195,150 @@ function arraySet(value) {
 }
 
 async function ensureScreenArtifacts() {
+  let existingArtifacts = null;
   if (await fileExists(screenArtifactsPath)) {
     const existing = await readJson(screenArtifactsPath);
-    if (Array.isArray(existing.screens)) {
-      return existing;
-    }
+    existingArtifacts = Array.isArray(existing.artifacts)
+      ? existing.artifacts
+      : Array.isArray(existing.screens)
+        ? existing.screens
+        : null;
   }
+
+  const existingById = new Map((existingArtifacts ?? []).map(a => [a.screen, a]));
+  const allCaptured =
+    existingArtifacts &&
+    existingArtifacts.length > 0 &&
+    existingArtifacts.every(a => a.metadataQuality === 'captured');
+  if (allCaptured) {
+    return { artifacts: existingArtifacts, screens: existingArtifacts };
+  }
+
   await mkdir(screenArtifactsDir, { recursive: true });
-  const screens = [];
+  const artifacts = [];
   for (const screen of matrix.screens ?? []) {
+    const existing = existingById.get(screen.id);
     const captureRow = captureById.get(screen.id);
-    const artifact = {
-      screen: screen.id,
-      screenshot: screen.screenshot,
-      viewport: matrix.viewport,
-      route: `/?qaScreen=${screen.qaScreen}`,
-      visibleText: [],
-      primaryCtas: [],
-      renderedGuardians: [],
-      renderedLocations: [],
-      gameState: {
-        qaScreen: screen.qaScreen,
-        state: screen.state,
-        expectedCharacters: screen.expectedCharacters ?? [],
-        captureStatus: captureRow?.status ?? 'missing',
-      },
-      metadataQuality: 'stub',
-      requiredEvidenceTypes: [],
-    };
-    screens.push(artifact);
+
+    if (existing && existing.metadataQuality === 'captured') {
+      artifacts.push(existing);
+      continue;
+    }
+
+    let artifact;
+    const domMeta = captureRow?.domMeta ?? null;
+    if (domMeta && captureRow) {
+      artifact = enrichArtifactFromDomMeta(screen, captureRow, domMeta, matrix.viewport);
+    } else if (existing) {
+      artifact = { ...existing };
+    } else {
+      artifact = buildStubArtifact(screen, captureRow, matrix.viewport);
+    }
+
+    artifacts.push(artifact);
     await writeJson(join(screenArtifactsDir, `${screen.id}.json`), artifact);
   }
+
   const aggregate = {
+    version: 1,
     generated_at: now,
-    source: 'qa_write_current_reviews fallback metadata',
-    report_dir: reportDir,
-    screens,
+    viewport: matrix.viewport,
+    artifacts,
+    screens: artifacts,
   };
   await writeJson(screenArtifactsPath, aggregate);
   return aggregate;
+}
+
+function enrichArtifactFromDomMeta(screen, captureRow, domMeta, viewport) {
+  const visibleText = Array.isArray(domMeta.visibleText) ? domMeta.visibleText : [];
+  const primaryCtas =
+    Array.isArray(domMeta.primaryCtas) && domMeta.primaryCtas.length > 0
+      ? domMeta.primaryCtas
+      : (domMeta.buttonLabels ?? []).map(label => ({
+          label,
+          enabled: true,
+          action: null,
+          bounds: null,
+          semanticRole: 'button',
+          disabledReason: null,
+        }));
+
+  const snap = domMeta.qaSnapshot ?? null;
+  const renderedGuardians =
+    snap?.guardians?.length > 0
+      ? snap.guardians.map(g => ({ ...g, evidence: 'qa_snapshot' }))
+      : (domMeta.ariaGuardians ?? []);
+  const renderedLocations =
+    snap?.locations?.length > 0
+      ? snap.locations.map(l => ({ ...l, evidence: 'qa_snapshot' }))
+      : (domMeta.ariaLocations ?? []);
+  const gameState = snap?.gameState ?? null;
+
+  const hasText = visibleText.length > 0;
+  const hasCtaOrGuardianOrLocation =
+    primaryCtas.length > 0 || renderedGuardians.length > 0 || renderedLocations.length > 0;
+  const hasGameState = gameState !== null;
+
+  let metadataQuality;
+  if (hasText && hasCtaOrGuardianOrLocation && hasGameState) {
+    metadataQuality = 'captured';
+  } else if (hasText || hasCtaOrGuardianOrLocation) {
+    metadataQuality = 'partial';
+  } else {
+    metadataQuality = 'stub';
+  }
+
+  const missingEvidence = [];
+  if (!hasText) missingEvidence.push('visibleText is empty');
+  if (primaryCtas.length === 0) missingEvidence.push('primaryCtas is empty');
+  if (
+    renderedGuardians.length === 0 &&
+    (screen.facets ?? []).some(f => ['guardian_presence', 'guardian_portrait'].includes(f))
+  ) {
+    missingEvidence.push('renderedGuardians missing for guardian facet screen');
+  }
+  if (!hasGameState) missingEvidence.push('gameState null — window.__QA_SNAPSHOT__ not exposed');
+
+  const sourceList = ['capture_result.domMeta'];
+  if (snap) sourceList.push('window.__QA_SNAPSHOT__');
+  if (domMeta.ariaGuardians?.length > 0 && !snap?.guardians?.length) sourceList.push('aria_dom_guardians');
+  if (domMeta.ariaLocations?.length > 0 && !snap?.locations?.length) sourceList.push('aria_dom_locations');
+
+  const captureStatus = captureRow.status;
+  return {
+    screen: screen.id,
+    screenshot: screen.screenshot,
+    status: captureStatus === 'captured' || captureStatus === 'skipped_cached' ? 'captured' : 'failed',
+    metadataQuality,
+    route: `/?qaScreen=${screen.qaScreen}`,
+    viewport,
+    visibleText,
+    primaryCtas,
+    renderedGuardians,
+    renderedLocations,
+    gameState,
+    missingEvidence,
+    source: sourceList,
+  };
+}
+
+function buildStubArtifact(screen, captureRow, viewport) {
+  return {
+    screen: screen.id,
+    screenshot: screen.screenshot,
+    status: captureRow?.status === 'captured' || captureRow?.status === 'skipped_cached' ? 'captured' : 'failed',
+    metadataQuality: 'stub',
+    route: `/?qaScreen=${screen.qaScreen}`,
+    viewport,
+    visibleText: [],
+    primaryCtas: [],
+    renderedGuardians: [],
+    renderedLocations: [],
+    gameState: null,
+    missingEvidence: ['no domMeta available — run qa_capture_chrome.mjs to populate artifacts'],
+    source: ['stub'],
+  };
 }
 
 async function readOptionalJson(path, fallback) {

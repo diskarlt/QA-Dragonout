@@ -29,6 +29,8 @@ const fixedRulesPath = process.env.QA_FIXED_RULES_PATH ?? 'tools/qa_fixed_rules.
 const screenArtifactsDir = process.env.QA_SCREEN_ARTIFACTS_DIR ?? join(reportDir, 'screen_artifacts');
 const screenArtifactsPath =
   process.env.QA_SCREEN_ARTIFACTS_PATH ?? join(reportDir, 'screen_artifacts.json');
+const playthroughTracePath =
+  process.env.QA_PLAYTHROUGH_TRACE_PATH ?? join(reportDir, 'playthrough_trace.json');
 
 const calibrationRound = 'regression-core-v1';
 const firstRoundScreenIds = ['start', 'base_status', 'guardian_dialog', 'location_dialog', 'outing'];
@@ -52,6 +54,8 @@ const profile = normalizeProfile(
 );
 const captureById = new Map((capture.results ?? []).map((result) => [result.id, result]));
 const lintById = new Map((lints.results ?? []).map((result) => [result.id, result]));
+const playthroughTraceDoc = await readOptionalJson(playthroughTracePath, { flows: [] });
+const traceByFlowId = new Map((playthroughTraceDoc.flows ?? []).map(f => [f.flow_id, f]));
 const qualityAxes = matrix.qualityStandard?.scoreKeys ?? scoreKeys();
 const now = new Date().toISOString();
 const screenArtifacts = await ensureScreenArtifacts();
@@ -418,6 +422,8 @@ function playthroughFlowReview(flow) {
     'choice_consequence',
     'ending_payoff',
   ];
+  const flowTrace = traceByFlowId.get(flow.id);
+  const hasTraceEvidence = flowTrace?.status === 'captured' || flowTrace?.status === 'partial';
   const qaIssues = rules.length > 0
     ? rules.map((rule) => issueFromFixedRule(rule, {
         source: 'playthrough_review',
@@ -430,14 +436,20 @@ function playthroughFlowReview(flow) {
         source: 'playthrough_review',
         targetType: 'flow',
         targetId: flow.id,
-        observed: `${flow.title} 흐름은 실제 한국어 transcript와 CTA/선택/결과 연결 기록이 부족해 PASS/FAIL을 판정할 수 없다.`,
+        observed: hasTraceEvidence
+          ? `${flow.title} 흐름은 playthrough_trace에서 화면 문구를 수집했으나 실제 선택/결과 연결 관찰이 필요하다.`
+          : `${flow.title} 흐름은 실제 한국어 transcript와 CTA/선택/결과 연결 기록이 부족해 PASS/FAIL을 판정할 수 없다.`,
         expected: `${flow.title} 흐름은 실제 화면 문구, 사용자 행동, CTA/선택/결과 연결을 기준으로 PASS 또는 FAIL을 판정해야 한다.`,
-        missingEvidence: [
-          '실제 화면 문구가 포함된 한국어 transcript',
-          'CTA/선택/결과 연결 근거',
-          '사용자 행동 순서 기록',
-        ],
-        blockedReason: `${flow.title} 흐름의 문제를 개발 티켓으로 확정할 직접 흐름 증거가 부족하다.`,
+        missingEvidence: hasTraceEvidence
+          ? (flowTrace.missingEvidence ?? []).concat(['CTA/선택/결과 연결 근거'])
+          : [
+              '실제 화면 문구가 포함된 한국어 transcript',
+              'CTA/선택/결과 연결 근거',
+              '사용자 행동 순서 기록',
+            ],
+        blockedReason: hasTraceEvidence
+          ? `${flow.title} 흐름은 화면 문구 trace가 있으나 실제 선택/결과 연결을 확정할 직접 흐름 증거가 부족하다.`
+          : `${flow.title} 흐름의 문제를 개발 티켓으로 확정할 직접 흐름 증거가 부족하다.`,
         sourcePointer: `codex_playthrough_review.json:flows:${flow.id}:qa_evidence_incomplete`,
       })];
   const failIssues = qaIssues.filter((issue) => issue.status === 'FAIL');
@@ -571,13 +583,17 @@ function contractStatusFromIssue(issue, group) {
 }
 
 function flowContractRows(labels = [], flow, ruleFailed, prefix) {
+  const flowTrace = traceByFlowId.get(flow.id);
+  const hasTraceEvidence = flowTrace?.status === 'captured' || flowTrace?.status === 'partial';
   return labels.map((label, index) => ({
     id: `${prefix}_${index + 1}`,
     label,
     status: ruleFailed ? 'fail' : 'not_observed',
     note: ruleFailed
       ? `${flow.title}의 ${label} 기준은 고정 QA 룰 finding 때문에 개발 큐로 승격됐다.`
-      : `${flow.title}의 ${label} 기준은 실제 한국어 transcript와 행동 연결 증거가 필요하다.`,
+      : hasTraceEvidence && prefix === 'observed_flow'
+        ? `${flow.title}의 ${label} 기준은 playthrough_trace(${flowTrace.status}) 화면 문구 기반으로 부분 수집됐다. 선택/결과 연결 관찰이 추가로 필요하다.`
+        : `${flow.title}의 ${label} 기준은 실제 한국어 transcript와 행동 연결 증거가 필요하다.`,
   }));
 }
 
@@ -589,6 +605,21 @@ function flowTranscript(flow, ruleFailed) {
       `현재 흐름 관찰 근거: ${rules.map((rule) => rule.observed_evidence).join(' / ')}`,
       `통과 기준: ${rules.map((rule) => `${rule.rule_id}=${rule.pass_criteria}`).join(' / ')}`,
     ];
+  }
+  const flowTrace = traceByFlowId.get(flow.id);
+  if (flowTrace?.steps?.length > 0) {
+    return (flow.steps ?? []).map((stepId, index) => {
+      const step = flowTrace.steps.find(s => s.screen === stepId);
+      if (step?.visibleText?.length > 0) {
+        const textSample = step.visibleText.slice(0, 4).join(' | ');
+        const ctaNote = step.primaryCta?.label ? ` → CTA: ${step.primaryCta.label}` : '';
+        const disabledNote = step.disabledChoices?.length > 0
+          ? ` (비활성: ${step.disabledChoices.map(c => c.label).join(', ')})`
+          : '';
+        return `${index + 1}. [${step.stage ?? stepId}] ${textSample}${ctaNote}${disabledNote}`;
+      }
+      return `${index + 1}. ${stepId} 화면의 실제 한국어 문구와 CTA 행동 기록이 없어 흐름 판정 보강이 필요하다.`;
+    });
   }
   return (flow.steps ?? []).map((step, index) => `${index + 1}. ${step} 화면의 실제 한국어 문구와 CTA 행동 기록이 없어 흐름 판정 보강이 필요하다.`);
 }

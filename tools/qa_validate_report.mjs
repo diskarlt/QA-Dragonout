@@ -38,6 +38,8 @@ const regressionLockPath =
   process.env.QA_REGRESSION_LOCK_PATH ?? join(reportDir, 'regression_lock.json');
 const screenArtifactsPath =
   process.env.QA_SCREEN_ARTIFACTS_PATH ?? join(reportDir, 'screen_artifacts.json');
+const playthroughTracePath =
+  process.env.QA_PLAYTHROUGH_TRACE_PATH ?? join(reportDir, 'playthrough_trace.json');
 const htmlReportPath = process.env.QA_HTML_REPORT_PATH ?? join(reportDir, 'report.html');
 const markdownReportPath = process.env.QA_MARKDOWN_REPORT_PATH ?? join(reportDir, 'report.md');
 const calibrationHtmlPath = process.env.QA_CALIBRATION_HTML_PATH ?? join(reportDir, 'calibration.html');
@@ -82,6 +84,7 @@ await loadCaptureResult();
 await validateScreenshots();
 await validateCaptureResult();
 await validateScreenArtifacts();
+await validatePlaythroughTrace();
 await validatePolishLints();
 await validateProductReview();
 await validatePlaythroughReview();
@@ -315,6 +318,48 @@ async function validateScreenArtifacts() {
       for (const cta of artifact.primaryCtas) {
         if (typeof cta.label !== 'string') errors.push(`screen artifact ${screen.id} primaryCtas entry missing label string.`);
         if (typeof cta.enabled !== 'boolean') errors.push(`screen artifact ${screen.id} primaryCtas entry missing enabled boolean.`);
+      }
+    }
+  }
+}
+
+async function validatePlaythroughTrace() {
+  if (!(await fileExists(playthroughTracePath))) {
+    return;
+  }
+  let traceDoc;
+  try {
+    traceDoc = await readJson(playthroughTracePath);
+  } catch {
+    errors.push('playthrough_trace.json is not valid JSON.');
+    return;
+  }
+  if (typeof traceDoc.version !== 'number') {
+    errors.push('playthrough_trace.json missing version field.');
+  }
+  if (!Array.isArray(traceDoc.flows)) {
+    errors.push('playthrough_trace.json must have flows array.');
+    return;
+  }
+  const validStatuses = new Set(['captured', 'partial', 'failed']);
+  for (const flow of traceDoc.flows) {
+    if (!flow.flow_id) {
+      errors.push('playthrough_trace.json flow missing flow_id.');
+      continue;
+    }
+    if (!validStatuses.has(flow.status)) {
+      errors.push(`playthrough_trace.json flow ${flow.flow_id} invalid status: "${flow.status}".`);
+    }
+    if (!Array.isArray(flow.missingEvidence)) {
+      errors.push(`playthrough_trace.json flow ${flow.flow_id} missingEvidence must be array.`);
+    }
+    if (!Array.isArray(flow.steps)) {
+      errors.push(`playthrough_trace.json flow ${flow.flow_id} steps must be array.`);
+      continue;
+    }
+    for (const step of flow.steps) {
+      if (!step.screen) {
+        errors.push(`playthrough_trace.json flow ${flow.flow_id} step missing screen field.`);
       }
     }
   }

@@ -28,6 +28,8 @@ const regressionLockPath =
 const liveStatusPath = process.env.QA_LIVE_STATUS_PATH ?? join(reportDir, 'qa_live_status.json');
 const screenArtifactsPath =
   process.env.QA_SCREEN_ARTIFACTS_PATH ?? join(reportDir, 'screen_artifacts.json');
+const playthroughTracePath =
+  process.env.QA_PLAYTHROUGH_TRACE_PATH ?? join(reportDir, 'playthrough_trace.json');
 const templatePath = process.env.QA_REPORT_TEMPLATE_PATH ?? 'tools/qa_report_template.html';
 const outputPath = process.env.QA_HTML_REPORT_PATH ?? join(reportDir, 'report.html');
 const markdownOutputPath = process.env.QA_MARKDOWN_REPORT_PATH ?? join(reportDir, 'report.md');
@@ -101,6 +103,8 @@ const screenArtifactsDoc = await readJsonOrDefault(screenArtifactsPath, { artifa
 const artifactByScreenId = new Map(
   ((screenArtifactsDoc.artifacts ?? screenArtifactsDoc.screens) ?? []).map(a => [a.screen, a]),
 );
+const playthroughTraceDoc = await readJsonOrDefault(playthroughTracePath, { flows: [] });
+const traceByFlowId = new Map((playthroughTraceDoc.flows ?? []).map(f => [f.flow_id, f]));
 
 const requiredScoreKeys = matrix.qualityStandard?.scoreKeys ?? scoreKeys();
 const lintById = new Map((lints.results ?? []).map((result) => [result.id, result]));
@@ -562,8 +566,28 @@ function renderFlowRow(row) {
         <div class="qa-card-section"><h4>Findings</h4>${renderReviewFindings(reviewed)}</div>
       </div>
       <div class="qa-card-section"><h4>수정 후보</h4>${renderFixCandidates(reviewed)}</div>
+      ${renderFlowTraceSummary(flow)}
     </div>
   </article>`;
+}
+
+function renderFlowTraceSummary(flow) {
+  const trace = traceByFlowId.get(flow.id);
+  if (!trace) {
+    return `<div class="qa-card-section"><h4>Trace Summary</h4><span class="muted">playthrough_trace.json에 항목 없음 — qa_playthrough_trace.mjs 실행 필요</span></div>`;
+  }
+  const qualityTone = { captured: 'pass', partial: 'low', failed: 'fail' }[trace.status] ?? 'low';
+  const stepsWithText = (trace.steps ?? []).filter(s => (s.visibleText ?? []).length > 0).length;
+  const textPreview = (trace.normalizedText ?? []).slice(0, 3).map(t => escapeHtml(t)).join(' / ') || '없음';
+  const missing = trace.missingEvidence ?? [];
+  return `<div class="qa-card-section"><h4>Trace Summary</h4>
+    <div class="artifact-summary">
+      <span class="contract-badge ${qualityTone}">${escapeHtml(trace.status)}</span>
+      <span class="muted">steps: ${escapeHtml(String(stepsWithText))}/${escapeHtml(String((trace.steps ?? []).length))} 문구 수집</span>
+      <div><b>텍스트 미리보기:</b> ${textPreview}</div>
+      ${missing.length > 0 ? `<div class="missing-evidence"><b>Missing evidence:</b><ul>${missing.map(m => `<li class="fail">${escapeHtml(m)}</li>`).join('')}</ul></div>` : ''}
+    </div>
+  </div>`;
 }
 
 function renderScores(scores, lowestScore, keys) {

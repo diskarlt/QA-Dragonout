@@ -943,6 +943,36 @@ const tests = [
       expectPass(dir, { expect: 'not_pass' });
     },
   ],
+  [
+    'missing motion artifact blocks guardian_motion_pseudo_live2d_presence',
+    async (dir) => {
+      const { rm: rmFs } = await import('node:fs/promises');
+      await rmFs(join(dir, 'motion_artifacts.json'), { force: true });
+      expectFail(dir, 'motion_artifacts.json missing');
+    },
+  ],
+  [
+    'motion artifact with fewer than 3 frames fails validation',
+    async (dir) => {
+      const motionPath = join(dir, 'motion_artifacts.json');
+      const doc = JSON.parse(await readFile(motionPath, 'utf8'));
+      const entry = doc.artifacts.find((a) => a.screen === 'base_status');
+      if (entry) entry.frames = entry.frames.slice(0, 1);
+      await writeFile(motionPath, JSON.stringify(doc, null, 2));
+      expectFail(dir, 'fewer than 3 frames');
+    },
+  ],
+  [
+    'motion artifact with status=failed blocks pass',
+    async (dir) => {
+      const motionPath = join(dir, 'motion_artifacts.json');
+      const doc = JSON.parse(await readFile(motionPath, 'utf8'));
+      const entry = doc.artifacts.find((a) => a.screen === 'base_status');
+      if (entry) entry.status = 'failed';
+      await writeFile(motionPath, JSON.stringify(doc, null, 2));
+      expectFail(dir, 'status=failed');
+    },
+  ],
 ];
 
 const testMatrix = JSON.parse(
@@ -1526,6 +1556,51 @@ async function writeBaseFixtureArtifacts(dir, matrix) {
   await writeCaptureFixture(dir, matrix);
   await writeScreenArtifacts(dir, matrix);
   await writePolishLintsFixture(dir, matrix);
+  await writeMotionArtifactsFixture(dir, matrix);
+}
+
+async function writeMotionArtifactsFixture(dir, matrix) {
+  const MOTION_SCREENS = new Set(['base_status', 'guardian_dialog', 'ending_cycle1', 'ending_cycle2', 'ending_cycle3', 'first_start_prologue']);
+  const motionDir = join(dir, 'motion_artifacts');
+  await mkdir(motionDir, { recursive: true });
+  const artifacts = [];
+  for (const screen of matrix.screens) {
+    if (!MOTION_SCREENS.has(screen.id)) continue;
+    const screenMotionDir = join(motionDir, screen.id);
+    await mkdir(screenMotionDir, { recursive: true });
+    const frames = [];
+    for (const ts of [0, 1000, 2000]) {
+      const frameName = `${screen.id}_frame_${String(ts).padStart(4, '0')}.png`;
+      const framePath = join(screenMotionDir, frameName);
+      await writeFile(framePath, pngFixture(matrix.viewport.width, matrix.viewport.height));
+      const fileStat = await stat(framePath);
+      frames.push({
+        timestampMs: ts,
+        path: `motion_artifacts/${screen.id}/${frameName}`,
+        bytes: fileStat.size,
+        viewport: matrix.viewport,
+        hash: `fixture_hash_${ts}`,
+      });
+    }
+    artifacts.push({
+      screen: screen.id,
+      status: 'captured',
+      mode: 'three_frame_png',
+      frames,
+      guardianIds: [],
+      portraitBounds: null,
+      changedRegions: [],
+      motionSignals: [],
+      verdictCandidate: null,
+      missingEvidence: [],
+    });
+  }
+  await writeJson(join(dir, 'motion_artifacts.json'), {
+    version: 1,
+    generated_at: new Date().toISOString(),
+    viewport: matrix.viewport,
+    artifacts,
+  });
 }
 
 async function writePolishLintsFixture(dir, matrix) {

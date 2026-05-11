@@ -6,6 +6,10 @@ import { dirname, join } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 
+const MOTION_SCREENS = new Set(['base_status', 'guardian_dialog', 'ending_cycle1', 'ending_cycle2', 'ending_cycle3', 'first_start_prologue']);
+const MOTION_FRAME_TIMESTAMPS = [0, 1000, 2000];
+const motionResults = [];
+
 class CdpClient {
   static connect(url) {
     return new Promise((resolve, reject) => {
@@ -195,6 +199,11 @@ try {
         cacheKey,
         ...(domMeta ? { domMeta } : {}),
       });
+
+      if (MOTION_SCREENS.has(id)) {
+        const motionResult = await captureMotionFrames(client, id, reportDir, width, height);
+        motionResults.push(motionResult);
+      }
       captureCache.entries ??= {};
       captureCache.entries[id] = {
         cacheKey,
@@ -228,6 +237,7 @@ try {
   }
   await writeCaptureResult().catch(() => {});
   await writeScreenArtifacts().catch(() => {});
+  await writeMotionArtifacts().catch(() => {});
   updateLiveReport('running', 'capture', `캡처 결과 저장: ${results.length}/${targets.length}`, results.length, targets.length);
 }
 
@@ -573,6 +583,95 @@ async function writeScreenArtifacts() {
         generated_at: new Date().toISOString(),
         viewport: { width, height },
         artifacts,
+      },
+      null,
+      2,
+    )}\n`,
+  );
+}
+
+async function captureMotionFrames(client, screenId, reportDir, vWidth, vHeight) {
+  const motionDir = join(reportDir, 'motion_artifacts', screenId);
+  await mkdir(motionDir, { recursive: true });
+
+  const frames = [];
+  const missingEvidence = [];
+
+  let lastTs = 0;
+  for (const ts of MOTION_FRAME_TIMESTAMPS) {
+    if (ts > lastTs) {
+      await sleep(ts - lastTs);
+    }
+    lastTs = ts;
+    const frameName = `${screenId}_frame_${String(ts).padStart(4, '0')}.png`;
+    const framePath = join(motionDir, frameName);
+    try {
+      const shot = await client.send('Page.captureScreenshot', { format: 'png', fromSurface: true }, 20000);
+      await writeFile(framePath, shot.data, 'base64');
+      const fileStat = await stat(framePath);
+      const hash = hashText(shot.data);
+      frames.push({
+        timestampMs: ts,
+        path: `motion_artifacts/${screenId}/${frameName}`,
+        bytes: fileStat.size,
+        viewport: { width: vWidth, height: vHeight },
+        hash,
+      });
+    } catch (err) {
+      missingEvidence.push(`frame_${ts}ms capture failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  const changedRegions = computeChangedRegions(frames);
+  const status = frames.length === MOTION_FRAME_TIMESTAMPS.length ? 'captured'
+    : frames.length > 0 ? 'partial'
+    : 'failed';
+
+  return {
+    screen: screenId,
+    status,
+    mode: 'three_frame_png',
+    frames,
+    guardianIds: [],
+    portraitBounds: null,
+    changedRegions,
+    motionSignals: [],
+    verdictCandidate: status === 'failed' ? 'BLOCKED' : portraitBoundsRequired(frames) ? 'BLOCKED' : null,
+    missingEvidence,
+  };
+}
+
+function computeChangedRegions(frames) {
+  if (frames.length < 2) return [];
+  const regions = [];
+  for (let i = 1; i < frames.length; i++) {
+    if (frames[i].hash !== frames[i - 1].hash) {
+      regions.push({
+        fromTimestampMs: frames[i - 1].timestampMs,
+        toTimestampMs: frames[i].timestampMs,
+        note: 'hash_changed — pixel diff analysis requires post-processing',
+      });
+    }
+  }
+  return regions;
+}
+
+function portraitBoundsRequired(frames) {
+  return frames.length > 0;
+}
+
+async function writeMotionArtifacts() {
+  if (motionResults.length === 0) return;
+  const motionDir = join(reportDir, 'motion_artifacts');
+  await mkdir(motionDir, { recursive: true });
+  await writeFile(
+    join(reportDir, 'motion_artifacts.json'),
+    `${JSON.stringify(
+      {
+        version: 1,
+        generated_at: new Date().toISOString(),
+        viewport: { width, height },
+        artifacts: motionResults,
       },
       null,
       2,

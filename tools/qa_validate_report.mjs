@@ -619,6 +619,42 @@ async function validateCalibrationCandidates() {
       errors.push(`qa_calibration_profile references unknown candidate: ${id}`);
     }
   }
+  for (const [candidateId, entry] of Object.entries(calibrationProfile.deferred ?? {})) {
+    if (typeof entry === 'object' && entry !== null && !Array.isArray(entry)) {
+      if (isBlank(entry.required_artifact)) {
+        errors.push(
+          `deferred calibration candidate ${candidateId} must have required_artifact field.`,
+        );
+      }
+    }
+  }
+  const profileNeedsRewriteIds = needsRewriteSet(calibrationProfile);
+  for (const candidateId of arraySet(calibrationProfile.accepted)) {
+    if (profileNeedsRewriteIds.has(candidateId)) {
+      errors.push(
+        `calibration candidate ${candidateId} cannot be in both accepted and needs_rewrite.`,
+      );
+    }
+  }
+  for (const candidateId of arraySet(calibrationProfile.accepted_after_rewrite)) {
+    if (!arraySet(calibrationProfile.accepted).has(candidateId)) {
+      errors.push(
+        `calibration candidate ${candidateId} is in accepted_after_rewrite but not in accepted.`,
+      );
+    }
+    const rewriteEntry = calibrationProfile.rewrites?.[candidateId];
+    if (!rewriteEntry || typeof rewriteEntry !== 'object' || Array.isArray(rewriteEntry)) {
+      errors.push(
+        `accepted_after_rewrite candidate ${candidateId} must have a rewrites entry.`,
+      );
+    } else {
+      for (const field of ['original_candidate_id', 'rewritten_claim', 'rewritten_fix', 'fixed_rule_candidate', 'pass_condition']) {
+        if (isBlank(rewriteEntry[field])) {
+          errors.push(`rewrites entry for ${candidateId} missing required field: ${field}.`);
+        }
+      }
+    }
+  }
   await validateCalibrationQueuePromotion();
 }
 
@@ -1572,6 +1608,9 @@ function normalizeCalibrationProfile(value) {
   return {
     version: value?.version ?? 2,
     accepted: Array.isArray(value?.accepted) ? value.accepted : [],
+    accepted_after_rewrite: Array.isArray(value?.accepted_after_rewrite)
+      ? value.accepted_after_rewrite
+      : [],
     rejected: Array.isArray(value?.rejected) ? value.rejected : [],
     needs_rewrite: normalizeNoteMap(value?.needs_rewrite),
     deferred: normalizeNoteMap(value?.deferred),
@@ -1723,7 +1762,12 @@ function objectKeysSet(value) {
 function normalizeNoteMap(value) {
   if (Array.isArray(value)) return Object.fromEntries(value.map((id) => [String(id), '']));
   if (!value || typeof value !== 'object') return {};
-  return Object.fromEntries(Object.entries(value).map(([key, note]) => [String(key), String(note ?? '')]));
+  return Object.fromEntries(
+    Object.entries(value).map(([key, note]) => [
+      String(key),
+      typeof note === 'object' && note !== null ? note : String(note ?? ''),
+    ]),
+  );
 }
 
 function normalizeObjectMap(value) {

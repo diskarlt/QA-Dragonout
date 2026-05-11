@@ -1309,6 +1309,11 @@ function renderCalibrationSetupBody() {
       ${summaryCard('고정 룰 수', String(fixedRules.length), fixedRules.length > 0 ? 'pass' : 'low')}
       ${summaryCard('현재 검출 finding', String(fixedRuleQueue.length), fixedRuleQueue.length > 0 ? 'fail' : 'pass')}
       ${summaryCard('CAL-S02 룰', String(fixedRules.filter((rule) => rule.source_candidate_id === 'CAL-S02').length), 'fail')}
+      ${summaryCard('수용', String(acceptedCalibrationCandidates.length), acceptedCalibrationCandidates.length > 0 ? 'pass' : 'low')}
+      ${summaryCard('수정 필요', String(rewriteCalibrationCandidates.length), 'low')}
+      ${summaryCard('나중에', String(deferredCalibrationCandidates.length), 'low')}
+      ${summaryCard('기각', String(rejectedCalibrationCandidates.length), rejectedCalibrationCandidates.length > 0 ? 'fail' : 'pass')}
+      ${summaryCard('미결', String(pendingCalibrationCandidates.length), pendingCalibrationCandidates.length === 0 ? 'pass' : 'fail')}
     </div>
   </header>
   <main>
@@ -1404,6 +1409,8 @@ function renderCalibrationCandidateCard(candidate) {
     <label class="calibration-field">메모
       <textarea data-calibration-field="note" rows="3">${escapeHtml(noteForCandidate(candidate.candidate_id))}</textarea>
     </label>
+    ${candidate.calibration_status === 'deferred' ? renderDeferredDetail(candidate.candidate_id) : ''}
+    ${candidate.calibration_status === 'needs_rewrite' ? renderNeedsRewriteDetail(candidate.candidate_id) : ''}
     <div class="calibration-rewrite-grid">
       <label class="calibration-field">문제 재작성
         <textarea data-calibration-field="rewrite_problem_claim" rows="3">${escapeHtml(rewriteField(candidate.candidate_id, 'problem_claim'))}</textarea>
@@ -1426,12 +1433,33 @@ function renderStatusRadio(candidate, status, label) {
 }
 
 function noteForCandidate(candidateId) {
-  return (
+  const raw =
     calibrationProfile.notes?.[candidateId] ??
     calibrationProfile.needs_rewrite?.[candidateId] ??
     calibrationProfile.deferred?.[candidateId] ??
-    ''
-  );
+    '';
+  if (typeof raw === 'object' && raw !== null) return String(raw.reason ?? '');
+  return String(raw);
+}
+
+function renderDeferredDetail(candidateId) {
+  const e = calibrationProfile.deferred?.[candidateId];
+  if (!e || typeof e !== 'object' || Array.isArray(e)) return '';
+  return `<div class="calibration-deferred-detail">
+    ${e.required_artifact ? `<p><strong>필요한 artifact:</strong> ${escapeHtml(e.required_artifact)}</p>` : ''}
+    ${e.recheck_after ? `<p><strong>재검토 시점:</strong> ${escapeHtml(e.recheck_after)}</p>` : ''}
+    ${e.owner_next_action ? `<p><strong>담당자 다음 액션:</strong> ${escapeHtml(e.owner_next_action)}</p>` : ''}
+  </div>`;
+}
+
+function renderNeedsRewriteDetail(candidateId) {
+  const e = calibrationProfile.needs_rewrite?.[candidateId];
+  if (!e || typeof e !== 'object' || Array.isArray(e)) return '';
+  return `<div class="calibration-rewrite-detail">
+    ${e.rewrite_goal ? `<p><strong>재작성 목표:</strong> ${escapeHtml(e.rewrite_goal)}</p>` : ''}
+    ${e.required_evidence ? `<p><strong>필요한 근거:</strong> ${escapeHtml(e.required_evidence)}</p>` : ''}
+    ${e.owner_next_action ? `<p><strong>담당자 다음 액션:</strong> ${escapeHtml(e.owner_next_action)}</p>` : ''}
+  </div>`;
 }
 
 function rewriteField(candidateId, field) {

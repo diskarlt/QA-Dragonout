@@ -44,6 +44,8 @@ const htmlReportPath = process.env.QA_HTML_REPORT_PATH ?? join(reportDir, 'repor
 const markdownReportPath = process.env.QA_MARKDOWN_REPORT_PATH ?? join(reportDir, 'report.md');
 const calibrationHtmlPath = process.env.QA_CALIBRATION_HTML_PATH ?? join(reportDir, 'calibration.html');
 const liveStatusPath = process.env.QA_LIVE_STATUS_PATH ?? join(reportDir, 'qa_live_status.json');
+const motionArtifactsPath =
+  process.env.QA_MOTION_ARTIFACTS_PATH ?? join(reportDir, 'motion_artifacts.json');
 const expectedFinalStatus = process.env.QA_EXPECT_FINAL_STATUS ?? 'pass';
 const qaMode = process.env.QA_MODE ?? 'full';
 const strictPass = expectedFinalStatus === 'pass';
@@ -75,6 +77,7 @@ let playthroughReviewDoc = null;
 let devQueueDoc = null;
 let regressionLockDoc = null;
 let screenArtifactsDoc = null;
+let motionArtifactsDoc = null;
 
 const FINAL_ISSUE_STATUSES = new Set(['PASS', 'FAIL', 'BLOCKED', 'RULE_INVALID', 'SKIP']);
 const QA_QUEUE_STATUSES = new Set(['BLOCKED', 'RULE_INVALID', 'SKIP']);
@@ -92,6 +95,7 @@ await validateFixedRules();
 await validateDevQueue();
 await validateRegressionLock();
 await validateCalibrationCandidates();
+await validateMotionArtifacts();
 await validateLiveStatus();
 await validateHtmlReport();
 await validateMarkdownReport();
@@ -1073,6 +1077,59 @@ async function validateHtmlReport() {
     }
   }
   await validateCalibrationSetupHtml();
+}
+
+async function validateMotionArtifacts() {
+  const MOTION_RULE_ID = 'guardian_motion_pseudo_live2d_presence';
+  const P0_MOTION_SCREENS = new Set(['base_status', 'guardian_dialog', 'ending_cycle1']);
+
+  const motionRuleExists = fixedRules.some((r) => r.rule_id === MOTION_RULE_ID);
+  if (!motionRuleExists) return;
+
+  if (!(await fileExists(motionArtifactsPath))) {
+    for (const screenId of P0_MOTION_SCREENS) {
+      errors.push(`motion_artifacts.json missing — ${MOTION_RULE_ID} cannot be judged for ${screenId}; must be BLOCKED.`);
+    }
+    return;
+  }
+
+  motionArtifactsDoc = await readJson(motionArtifactsPath);
+  const artifactsByScreen = new Map(
+    (motionArtifactsDoc.artifacts ?? []).map((a) => [a.screen, a]),
+  );
+
+  for (const screenId of P0_MOTION_SCREENS) {
+    const artifact = artifactsByScreen.get(screenId);
+    if (!artifact) {
+      errors.push(`motion_artifacts.json missing entry for ${screenId} — ${MOTION_RULE_ID} must be BLOCKED.`);
+      continue;
+    }
+    if (artifact.status === 'failed') {
+      errors.push(`motion artifact for ${screenId} has status=failed — ${MOTION_RULE_ID} must be BLOCKED.`);
+    }
+    if (!artifact.frames || artifact.frames.length < 3) {
+      errors.push(`motion artifact for ${screenId} has fewer than 3 frames — capture is incomplete.`);
+    }
+  }
+
+  const productReview = productReviewDoc ?? { screens: [] };
+  for (const screen of productReview.screens ?? []) {
+    if (!P0_MOTION_SCREENS.has(screen.id)) continue;
+    const artifact = artifactsByScreen.get(screen.id);
+    const hasArtifact = artifact && artifact.status !== 'failed' && (artifact.frames ?? []).length >= 3;
+    for (const issue of screen.qa_issues ?? []) {
+      if (issue.source !== MOTION_RULE_ID) continue;
+      if (issue.status === 'PASS' && !hasArtifact) {
+        errors.push(`${screen.id} ${MOTION_RULE_ID} is PASS but no valid motion artifact exists — must be BLOCKED.`);
+      }
+    }
+    for (const rule of screen.fixed_rules ?? []) {
+      if (rule.rule_id !== MOTION_RULE_ID) continue;
+      if (rule.verdict === 'PASS' && !hasArtifact) {
+        errors.push(`${screen.id} fixed rule ${MOTION_RULE_ID} verdict=PASS without motion artifact — must be BLOCKED.`);
+      }
+    }
+  }
 }
 
 async function validateMarkdownReport() {

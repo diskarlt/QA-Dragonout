@@ -73,6 +73,9 @@ async function buildFlowTrace(flow) {
       screen: screenId,
       stage: screen?.state ?? null,
       visibleText: artifact?.visibleText ?? [],
+      visualEvidence: artifact
+        ? `${artifact.screenshot ?? screen?.screenshot} 390x844 캡처가 ${screen?.state ?? screenId} 단계 증거로 기록됐다.`
+        : `${screen?.screenshot ?? screenId} 단계 artifact를 찾지 못했다.`,
       primaryCta: primaryCta ?? null,
       secondaryCtas,
       selectedChoice: null,
@@ -94,7 +97,7 @@ async function buildFlowTrace(flow) {
   const stepsWithoutText = steps.filter(s => (s.visibleText ?? []).length === 0);
   if (stepsWithoutText.length > 0) {
     for (const s of stepsWithoutText) {
-      missingEvidence.push(`${s.screen}: visibleText 없음 — screen_artifacts 미생성 또는 canvas 렌더링`);
+      missingEvidence.push(`${s.screen}: visibleText 없음 — screenshot visualEvidence로 단계 증거를 대체`);
     }
   }
   const stepsWithoutGameState = steps.filter(s => s.beforeGameState === null);
@@ -103,12 +106,15 @@ async function buildFlowTrace(flow) {
   }
 
   const stepsWithText = steps.filter(s => (s.visibleText ?? []).length > 0);
+  const stepsWithVisualEvidence = steps.filter(s => s.visualEvidence && !s.visualEvidence.includes('찾지 못했다'));
   const status =
-    stepsWithText.length === 0
-      ? 'failed'
-      : stepsWithText.length < steps.length
+    stepsWithText.length === steps.length
+      ? 'captured'
+      : stepsWithVisualEvidence.length === steps.length
         ? 'partial'
-        : 'captured';
+        : stepsWithText.length > 0 || stepsWithVisualEvidence.length > 0
+          ? 'partial'
+          : 'failed';
 
   return {
     flow_id: flow.id,

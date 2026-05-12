@@ -6,7 +6,6 @@ import { dirname, join } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 
-const MOTION_SCREENS = new Set(['base_status', 'guardian_dialog', 'ending_cycle1', 'ending_cycle2', 'ending_cycle3', 'first_start_prologue']);
 const MOTION_FRAME_TIMESTAMPS = [0, 1000, 2000];
 const motionResults = [];
 
@@ -98,6 +97,7 @@ const targets = matrix.screens
     waitMs: screen.waitMs ?? 4500,
     wheelY: screen.wheelY ?? 0,
   }));
+const motionScreens = motionScreenIds(matrix);
 
 await mkdir(outputDir, { recursive: true });
 const reportDir = dirname(outputDir);
@@ -168,6 +168,8 @@ try {
       });
       await client.send('Page.navigate', { url });
       await sleep(waitMs);
+      await enableFlutterAccessibility(client).catch(() => null);
+      await sleep(300);
       if (wheelY > 0) {
         await client.send('Input.dispatchMouseEvent', {
           type: 'mouseWheel',
@@ -200,7 +202,7 @@ try {
         ...(domMeta ? { domMeta } : {}),
       });
 
-      if (MOTION_SCREENS.has(id)) {
+      if (motionScreens.has(id)) {
         const motionResult = await captureMotionFrames(client, id, reportDir, width, height);
         motionResults.push(motionResult);
       }
@@ -346,6 +348,26 @@ function deriveGroupsFromChangedFiles(files) {
   return groups;
 }
 
+function motionScreenIds(matrixDoc) {
+  const ids = new Set();
+  for (const screen of matrixDoc.screens ?? []) {
+    const criteria = [
+      ...(screen.expected ?? []),
+      ...(screen.implementedEvidence ?? []),
+      ...(screen.forbidden ?? []),
+    ];
+    if (criteria.some((item) => isMotionCriterion(item.id))) {
+      ids.add(screen.id);
+    }
+  }
+  return ids;
+}
+
+function isMotionCriterion(id) {
+  const text = String(id ?? '').toLowerCase();
+  return text.includes('motion') || text.includes('live2d');
+}
+
 function hashText(value) {
   return createHash('sha256').update(value).digest('hex').slice(0, 16);
 }
@@ -374,6 +396,32 @@ async function captureDomMeta(client) {
       (() => {
         const visibleText = (document.body?.innerText ?? '')
           .split('\\n').map(s => s.trim()).filter(Boolean).slice(0, 200);
+
+        const semanticNodes = [...document.querySelectorAll('[aria-label],[role],button,a,flt-semantics')]
+          .slice(0, 240)
+          .map(el => {
+            const rect = el.getBoundingClientRect();
+            const label = (
+              el.getAttribute('aria-label') ??
+              el.getAttribute('title') ??
+              el.textContent ??
+              ''
+            ).trim().replace(/\\s+/g, ' ').slice(0, 120);
+            const role = el.getAttribute('role') ?? (el.tagName === 'BUTTON' ? 'button' : el.tagName.toLowerCase());
+            return {
+              label,
+              role,
+              enabled: !(el.disabled || el.getAttribute('aria-disabled') === 'true' || el.hasAttribute('disabled')),
+              bounds: {
+                x: Math.round(rect.x),
+                y: Math.round(rect.y),
+                width: Math.round(rect.width),
+                height: Math.round(rect.height),
+              },
+              visible: rect.width > 0 && rect.height > 0,
+            };
+          })
+          .filter(node => node.label && node.label !== 'Enable accessibility');
 
         const ctaEls = [...document.querySelectorAll('button,[role="button"],[role="link"]')];
         const primaryCtas = ctaEls.slice(0, 30).map(el => {
@@ -431,19 +479,39 @@ async function captureDomMeta(client) {
 
         const ariaLabels = [...document.querySelectorAll('[aria-label]')]
           .map(el => (el.getAttribute('aria-label') ?? '').trim().slice(0, 80))
-          .filter(Boolean).slice(0, 30);
+          .filter(label => label && label !== 'Enable accessibility').slice(0, 80);
 
-        const allText = document.body?.innerText ?? '';
+        const allText = [
+          document.body?.innerText ?? '',
+          ariaLabels.join('\\n'),
+          semanticNodes.map(n => n.label).join('\\n'),
+        ].join('\\n');
         const keywords = ${JSON.stringify(lockUnlockKeywords)};
         const lockUnlockHints = keywords.filter(k => allText.toLowerCase().includes(k.toLowerCase()));
 
-        return { visibleText, primaryCtas, qaSnapshot, ariaGuardians, ariaLocations, imgSrcs, ariaLabels, lockUnlockHints };
+        return { visibleText, primaryCtas, qaSnapshot, ariaGuardians, ariaLocations, imgSrcs, ariaLabels, semanticNodes, lockUnlockHints };
       })()
     `,
     returnByValue: true,
     timeout: 5000,
   });
   return result?.result?.value ?? null;
+}
+
+async function enableFlutterAccessibility(client) {
+  await client.send('Runtime.evaluate', {
+    expression: `
+      (() => {
+        const candidates = [...document.querySelectorAll('[aria-label="Enable accessibility"], button, [role="button"]')];
+        const target = candidates.find(el => (el.getAttribute('aria-label') ?? el.textContent ?? '').trim() === 'Enable accessibility');
+        if (!target) return { enabled: false, reason: 'button_not_found' };
+        target.click();
+        return { enabled: true };
+      })()
+    `,
+    returnByValue: true,
+    timeout: 3000,
+  });
 }
 
 function buildScreenArtifact(target, captureResult, domMeta, viewport) {
@@ -473,8 +541,24 @@ function buildScreenArtifact(target, captureResult, domMeta, viewport) {
   }
 
   const snap = domMeta.qaSnapshot ?? null;
-  const visibleText = Array.isArray(domMeta.visibleText) ? domMeta.visibleText : [];
-  const primaryCtas = Array.isArray(domMeta.primaryCtas) ? domMeta.primaryCtas : [];
+  const semanticNodes = Array.isArray(domMeta.semanticNodes) ? domMeta.semanticNodes : [];
+  const semanticText = semanticNodes.map(node => node.label).filter(Boolean);
+  const visibleText = Array.isArray(domMeta.visibleText) && domMeta.visibleText.length > 0
+    ? domMeta.visibleText
+    : dedupeStrings([...(domMeta.ariaLabels ?? []), ...semanticText]).slice(0, 200);
+  const primaryCtas = Array.isArray(domMeta.primaryCtas) && domMeta.primaryCtas.length > 0
+    ? domMeta.primaryCtas
+    : semanticNodes
+        .filter(node => ['button', 'link'].includes(String(node.role ?? '').toLowerCase()))
+        .slice(0, 30)
+        .map(node => ({
+          label: node.label,
+          enabled: node.enabled !== false,
+          action: null,
+          bounds: node.bounds ?? null,
+          semanticRole: node.role ?? 'button',
+          disabledReason: node.enabled === false ? 'aria-disabled' : null,
+        }));
 
   let renderedGuardians = [];
   let guardianSource = null;
@@ -493,6 +577,9 @@ function buildScreenArtifact(target, captureResult, domMeta, viewport) {
   } else if (domMeta.ariaGuardians?.length > 0) {
     renderedGuardians = domMeta.ariaGuardians;
     guardianSource = 'aria_dom';
+  } else {
+    renderedGuardians = inferGuardiansFromSemanticText(target, visibleText, semanticNodes);
+    guardianSource = renderedGuardians.length > 0 ? 'semantic_text' : null;
   }
 
   let renderedLocations = [];
@@ -555,6 +642,50 @@ function buildScreenArtifact(target, captureResult, domMeta, viewport) {
     missingEvidence,
     source: sourceList,
   };
+}
+
+function inferGuardiansFromSemanticText(target, visibleText, semanticNodes) {
+  const expected = Array.isArray(target.expectedCharacters) ? target.expectedCharacters : [];
+  if (expected.length === 0) return [];
+  const names = new Map([
+    ['dragon', ['드래곤', '용']],
+    ['lamir', ['라미르']],
+    ['kael', ['카엘']],
+    ['ersha', ['에르샤']],
+    ['orden', ['오르덴']],
+  ]);
+  const joined = visibleText.join(' ');
+  return expected
+    .map((guardianId) => {
+      const aliases = names.get(guardianId) ?? [guardianId];
+      const matchingNode = semanticNodes.find(node =>
+        aliases.some(alias => String(node.label ?? '').includes(alias)),
+      );
+      const hasText = aliases.some(alias => joined.includes(alias)) || matchingNode;
+      if (!hasText) return null;
+      return {
+        guardianId,
+        displayName: aliases[0] ?? guardianId,
+        semanticId: guardianId,
+        state: 'semantic_text',
+        bounds: matchingNode?.bounds ?? null,
+        visible: matchingNode?.visible ?? true,
+        evidence: 'semantic_text',
+      };
+    })
+    .filter(Boolean);
+}
+
+function dedupeStrings(values) {
+  const seen = new Set();
+  const result = [];
+  for (const value of values) {
+    const text = String(value ?? '').replace(/\s+/g, ' ').trim();
+    if (!text || seen.has(text)) continue;
+    seen.add(text);
+    result.push(text);
+  }
+  return result;
 }
 
 async function writeScreenArtifacts() {

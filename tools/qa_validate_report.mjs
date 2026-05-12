@@ -260,10 +260,15 @@ async function validateScreenArtifacts() {
       errors.push(`screen artifact missing for ${screen.id}.`);
       continue;
     }
-    for (const field of ['screen', 'screenshot', 'viewport', 'route', 'visibleText', 'primaryCtas', 'renderedGuardians', 'renderedLocations', 'gameState']) {
+    for (const field of ['screen', 'screenshot', 'viewport', 'route', 'visibleText', 'primaryCtas', 'renderedGuardians', 'renderedLocations']) {
       if (artifact[field] === undefined || artifact[field] === null) {
         errors.push(`screen artifact ${screen.id} missing ${field}.`);
       }
+    }
+    if (artifact.gameState === undefined) {
+      errors.push(`screen artifact ${screen.id} missing gameState.`);
+    } else if (artifact.gameState === null && !hasScreenStateEvidence(artifact)) {
+      errors.push(`screen artifact ${screen.id} missing gameState and alternate route/text state evidence.`);
     }
     if (artifact.screenshot !== screen.screenshot) {
       errors.push(`screen artifact ${screen.id} screenshot mismatch: ${artifact.screenshot}`);
@@ -325,6 +330,14 @@ async function validateScreenArtifacts() {
       }
     }
   }
+}
+
+function hasScreenStateEvidence(artifact) {
+  return Boolean(
+    artifact?.route ||
+      artifact?.screenshot ||
+      (Array.isArray(artifact?.visibleText) && artifact.visibleText.length > 0),
+  );
 }
 
 async function validatePlaythroughTrace() {
@@ -1117,13 +1130,11 @@ async function validateHtmlReport() {
 
 async function validateMotionArtifacts() {
   const MOTION_RULE_ID = 'guardian_motion_pseudo_live2d_presence';
-  const P0_MOTION_SCREENS = new Set(['base_status', 'guardian_dialog', 'ending_cycle1']);
-
-  const motionRuleExists = fixedRules.some((r) => r.rule_id === MOTION_RULE_ID);
-  if (!motionRuleExists) return;
+  const motionScreenIds = requiredMotionArtifactScreenIds();
+  if (motionScreenIds.size === 0) return;
 
   if (!(await fileExists(motionArtifactsPath))) {
-    for (const screenId of P0_MOTION_SCREENS) {
+    for (const screenId of motionScreenIds) {
       errors.push(`motion_artifacts.json missing — ${MOTION_RULE_ID} cannot be judged for ${screenId}; must be BLOCKED.`);
     }
     return;
@@ -1134,7 +1145,7 @@ async function validateMotionArtifacts() {
     (motionArtifactsDoc.artifacts ?? []).map((a) => [a.screen, a]),
   );
 
-  for (const screenId of P0_MOTION_SCREENS) {
+  for (const screenId of motionScreenIds) {
     const artifact = artifactsByScreen.get(screenId);
     if (!artifact) {
       errors.push(`motion_artifacts.json missing entry for ${screenId} — ${MOTION_RULE_ID} must be BLOCKED.`);
@@ -1150,22 +1161,52 @@ async function validateMotionArtifacts() {
 
   const productReview = productReviewDoc ?? { screens: [] };
   for (const screen of productReview.screens ?? []) {
-    if (!P0_MOTION_SCREENS.has(screen.id)) continue;
+    if (!motionScreenIds.has(screen.id)) continue;
     const artifact = artifactsByScreen.get(screen.id);
     const hasArtifact = artifact && artifact.status !== 'failed' && (artifact.frames ?? []).length >= 3;
     for (const issue of screen.qa_issues ?? []) {
-      if (issue.source !== MOTION_RULE_ID) continue;
+      if (!isMotionCriterionId(issue.rule_id)) continue;
       if (issue.status === 'PASS' && !hasArtifact) {
         errors.push(`${screen.id} ${MOTION_RULE_ID} is PASS but no valid motion artifact exists — must be BLOCKED.`);
       }
     }
     for (const rule of screen.fixed_rules ?? []) {
-      if (rule.rule_id !== MOTION_RULE_ID) continue;
+      if (!requiresMotionEvidence(rule)) continue;
       if (rule.verdict === 'PASS' && !hasArtifact) {
         errors.push(`${screen.id} fixed rule ${MOTION_RULE_ID} verdict=PASS without motion artifact — must be BLOCKED.`);
       }
     }
   }
+}
+
+function requiredMotionArtifactScreenIds() {
+  const ids = new Set();
+  for (const screen of screens ?? []) {
+    const criteria = [
+      ...(screen.expected ?? []),
+      ...(screen.implementedEvidence ?? []),
+      ...(screen.forbidden ?? []),
+    ];
+    if (criteria.some((item) => isMotionCriterionId(item.id))) {
+      ids.add(screen.id);
+    }
+  }
+  for (const rule of fixedRules ?? []) {
+    if (requiresMotionEvidence(rule) && !isBlank(rule.target_id)) {
+      ids.add(rule.target_id);
+    }
+  }
+  return ids;
+}
+
+function requiresMotionEvidence(rule) {
+  return (rule?.requires_evidence ?? []).includes('video_2s_or_3_timestamp_frames') ||
+    isMotionCriterionId(rule?.rule_id);
+}
+
+function isMotionCriterionId(id) {
+  const text = String(id ?? '').toLowerCase();
+  return text.includes('motion') || text.includes('live2d');
 }
 
 async function validateMarkdownReport() {

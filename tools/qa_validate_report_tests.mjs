@@ -463,8 +463,12 @@ const tests = [
         }
         if (!html.includes(ruleId)) throw new Error(`expected report.html to include ${ruleId}`);
         if (ruleId === 'guardian_motion_pseudo_live2d_presence') {
-          if (!devQueue.qa_queue.some((item) => item.rule_id === ruleId && item.status === 'BLOCKED')) {
-            throw new Error(`expected qa_queue to include blocked motion rule ${ruleId}`);
+          const motionIssue = (baseStatus.qa_issues ?? []).find((item) => item.rule_id === ruleId);
+          if (motionIssue?.status !== 'PASS') {
+            throw new Error(`expected motion artifact evidence to classify ${ruleId} as PASS`);
+          }
+          if (devQueue.qa_queue.some((item) => item.rule_id === ruleId && item.status === 'BLOCKED')) {
+            throw new Error(`expected qa_queue not to include blocked motion rule ${ruleId} when artifact exists`);
           }
         } else if (!devQueue.items.some((item) => item.rule_id === ruleId)) {
           throw new Error(`expected dev_queue.json to include ${ruleId}`);
@@ -517,6 +521,16 @@ const tests = [
       const firstReportFlow = playthroughReview.flows.find((flow) => flow.flow_id === 'first_report_flow');
       if (!(firstReportFlow?.qa_issues ?? []).some((issue) => issue.rule_id === 'first_report_flow_role_separation')) {
         throw new Error('expected first_report_flow to keep first_report_flow_role_separation');
+      }
+      for (const flowId of ['first_time_flow', 'archive_flow', 'ending_cycle2_flow', 'ending_cycle3_flow', 'user_regression_flow']) {
+        const flow = playthroughReview.flows.find((item) => item.flow_id === flowId);
+        if (!flow) throw new Error(`missing playthrough flow ${flowId}`);
+        if (flow.verdict === 'blocked') {
+          throw new Error(`expected ${flowId} to use screenshot/trace evidence instead of BLOCKED`);
+        }
+        if (!(flow.qa_issues ?? []).some((issue) => issue.status === 'PASS')) {
+          throw new Error(`expected ${flowId} to keep PASS flow evidence issue`);
+        }
       }
       expectPass(dir, { expect: 'not_pass' });
     },
@@ -1643,7 +1657,7 @@ async function writeBaseFixtureArtifacts(dir, matrix) {
 }
 
 async function writeMotionArtifactsFixture(dir, matrix) {
-  const MOTION_SCREENS = new Set(['base_status', 'guardian_dialog', 'ending_cycle1', 'ending_cycle2', 'ending_cycle3', 'first_start_prologue']);
+  const MOTION_SCREENS = motionScreenIds(matrix);
   const motionDir = join(dir, 'motion_artifacts');
   await mkdir(motionDir, { recursive: true });
   const artifacts = [];
@@ -1684,6 +1698,26 @@ async function writeMotionArtifactsFixture(dir, matrix) {
     viewport: matrix.viewport,
     artifacts,
   });
+}
+
+function motionScreenIds(matrix) {
+  const ids = new Set();
+  for (const screen of matrix.screens ?? []) {
+    const criteria = [
+      ...(screen.expected ?? []),
+      ...(screen.implementedEvidence ?? []),
+      ...(screen.forbidden ?? []),
+    ];
+    if (criteria.some((item) => isMotionCriterionId(item.id))) {
+      ids.add(screen.id);
+    }
+  }
+  return ids;
+}
+
+function isMotionCriterionId(id) {
+  const text = String(id ?? '').toLowerCase();
+  return text.includes('motion') || text.includes('live2d');
 }
 
 async function writePolishLintsFixture(dir, matrix) {

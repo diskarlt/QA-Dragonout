@@ -192,6 +192,7 @@ export function passIssue(options = {}) {
     status: 'PASS',
     severity: options.severity ?? 'P3',
     category: options.category ?? 'qa_contract',
+    rule_id: options.ruleId,
     evidence: {
       screenshot: options.screenshot ?? null,
       observed: options.observed ?? options.passEvidence,
@@ -200,6 +201,7 @@ export function passIssue(options = {}) {
     pass_evidence: options.passEvidence ?? options.observed,
     pass_condition: options.passCondition ?? `${targetId} 기준이 다음 QA에서도 같은 관찰 근거로 확인되어야 한다.`,
     concrete_observed_evidence: options.concreteObservedEvidence ?? options.passEvidence ?? options.observed,
+    required_artifact: options.requiredArtifact,
     recommended_fix: options.recommendedFix ?? '추가 개발 조치 없음.',
     regression_lock: options.regressionLock ?? REGRESSION_LOCK_SCREEN_IDS.includes(targetId),
     source_pointer: options.sourcePointer,

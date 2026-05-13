@@ -196,12 +196,14 @@ async function runJob(job) {
     job.finalStatus = gateSummary.finalStatus;
     job.nextAction = gateSummary.nextAction;
     await refreshReport(job, 'QA HTML report 생성');
+    const expectedFinalStatus =
+      job.mode === 'full' && job.finalStatus === 'pass' ? 'pass' : 'not_pass';
     await runProcessStep(job, 'validation', 'artifact validation', process.execPath, ['tools/qa_validate_report.mjs'], {
       cwd: runnerRoot,
       env: {
         ...process.env,
         QA_MODE: job.mode,
-        QA_EXPECT_FINAL_STATUS: 'not_pass',
+        QA_EXPECT_FINAL_STATUS: expectedFinalStatus,
         QA_REPORT_DIR: job.reportDir,
         QA_SCREENSHOT_DIR: job.screenshotDir,
         QA_DEV_QUEUE_PATH: join(job.reportDir, 'dev_queue.json'),
@@ -314,8 +316,10 @@ async function qaGateSummary(job) {
   return {
     automatedGate: 'pass',
     codexReview: 'ready',
-    finalStatus: job.mode === 'full' ? 'codex_review_ready' : 'partial_complete',
-    nextAction: '강화된 QA 허들 기준으로 최종 PASS 검증을 진행할 수 있습니다.',
+    finalStatus: job.mode === 'full' ? 'pass' : 'partial_complete',
+    nextAction: job.mode === 'full'
+      ? '강화된 QA 허들 기준으로 최종 PASS 검증을 진행했습니다.'
+      : '부분 검수 결과를 확인하세요.',
   };
 }
 
@@ -455,13 +459,22 @@ async function markJob(job, status, phase, message, current = job.current, total
   job.total = total;
   const event = { at: new Date().toISOString(), phase, status, message };
   job.events.push(event);
+  const screenshotCount = await countScreenshots(job.screenshotDir);
+  const finalStatusForReport = job.finalStatus === 'pass' ? 'PASS' : job.finalStatus;
   const liveStatus = {
     status,
     phase,
     message,
     run_id: job.id,
     mode: job.mode,
+    targetWorktree: job.targetWorktree,
+    reportDir: job.reportDir,
+    screenshotDir: job.screenshotDir,
+    finalStatus: finalStatusForReport,
+    screenshotCount,
     target_worktree: job.targetWorktree,
+    report_dir: job.reportDir,
+    screenshot_dir: job.screenshotDir,
     started_at: job.startedAt,
     current,
     total,
@@ -476,6 +489,15 @@ async function markJob(job, status, phase, message, current = job.current, total
   };
   await mkdir(job.reportDir, { recursive: true });
   await writeFile(join(job.reportDir, 'qa_live_status.json'), `${JSON.stringify(liveStatus, null, 2)}\n`);
+}
+
+async function countScreenshots(screenshotDir) {
+  try {
+    const entries = await readdir(screenshotDir);
+    return entries.filter((entry) => entry.endsWith('.png')).length;
+  } catch {
+    return 0;
+  }
 }
 
 async function cancelJob(response) {

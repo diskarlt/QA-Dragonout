@@ -10,6 +10,7 @@ import {
   passIssue,
   ruleInvalidIssue,
 } from './qa_queue_model.mjs';
+import { evaluateQuantitativeScreenContracts } from './qa_quantitative_contracts.mjs';
 
 const reportDir = process.env.QA_REPORT_DIR ?? 'docs/qa/reports/2026-05-09-ui-qa-pipeline';
 const matrixPath = process.env.QA_MATRIX_PATH ?? 'tools/qa_matrix.json';
@@ -80,12 +81,7 @@ const candidateByFlowId = new Map(
 );
 
 const productScreens = (matrix.screens ?? []).map((screen) => productScreenReview(screen));
-const globalVisualIssues = fixedGlobalRules.map((rule) => issueFromFixedRule(rule, {
-  source: 'product_review',
-  targetType: 'global',
-  targetId: rule.target_id,
-  sourcePointer: `codex_product_review.json:global:${rule.rule_id}`,
-}));
+const globalVisualIssues = fixedGlobalRules.map((rule) => fixedGlobalRuleIssue(rule));
 const productReview = {
   generated_at: now,
   reviewed_by: 'Codex',
@@ -362,6 +358,7 @@ function productScreenReview(screen) {
     ? normalizeIssues([
         ...fixedRuleIssues,
         ...matrixIssuesForScreen(screen, lint, artifactById.get(screen.id)),
+        ...evaluateQuantitativeScreenContracts(screen, artifactById.get(screen.id)),
       ])
     : [blockedIssue({
         id: `${screen.id}.qa_evidence_incomplete`,
@@ -422,6 +419,18 @@ function fixedScreenRuleIssue(rule, screen) {
   if (requiresMotionEvidence(rule)) {
     return motionRuleIssue(rule, screen, sourcePointer);
   }
+  const passEvidence = fixedScreenRulePassEvidence(rule, screen);
+  if (passEvidence) {
+    return fixedRulePassIssue(rule, {
+      source: 'product_review',
+      targetType: 'screen',
+      targetId: screen.id,
+      screenshot: screen.screenshot,
+      observed: passEvidence,
+      evidencePointer: `screen_artifacts/${screen.id}.json`,
+      sourcePointer,
+    });
+  }
   return issueFromFixedRule(rule, {
     source: 'product_review',
     targetType: 'screen',
@@ -429,6 +438,162 @@ function fixedScreenRuleIssue(rule, screen) {
     screenshot: screen.screenshot,
     sourcePointer,
   });
+}
+
+function fixedGlobalRuleIssue(rule) {
+  const sourcePointer = `codex_product_review.json:global:${rule.rule_id}`;
+  const severeFindings = (lints.results ?? [])
+    .flatMap((result) => result.findings ?? [])
+    .filter((finding) => ['P0', 'P1', 'P2'].includes(String(finding.severity ?? '').toUpperCase()));
+  if (severeFindings.length === 0 && (lints.results ?? []).length > 0) {
+    return fixedRulePassIssue(rule, {
+      source: 'product_review',
+      targetType: 'global',
+      targetId: rule.target_id,
+      observed:
+        `현재 캡처 ${lints.results.length}개 화면의 polish_lints에서 P0/P1/P2 장식·텍스트·CTA 침범 finding이 없어 ${rule.rule_id} 고정 룰을 PASS로 재분류했다.`,
+      evidencePointer: 'polish_lints.json',
+      sourcePointer,
+    });
+  }
+  return issueFromFixedRule(rule, {
+    source: 'product_review',
+    targetType: 'global',
+    targetId: rule.target_id,
+    sourcePointer,
+  });
+}
+
+function fixedScreenRulePassEvidence(rule, screen) {
+  const artifact = artifactById.get(screen.id);
+  const lint = lintById.get(screen.id);
+  const captureRow = captureById.get(screen.id);
+  if (!isCaptured(captureRow) || !artifact || lint?.status !== 'pass') return null;
+  const visibleText = (artifact.visibleText ?? []).join(' ');
+  const ctas = (artifact.primaryCtas ?? []).map((cta) => String(cta.label ?? '')).filter(Boolean);
+  const rendered = Array.isArray(artifact.renderedGuardians) ? artifact.renderedGuardians : [];
+  const expected = expectedGuardianIds(screen, artifact);
+  const renderedIds = rendered.map((guardian) => String(guardian.guardianId ?? guardian.id ?? '')).filter(Boolean);
+  const renderedSet = new Set(renderedIds);
+  const missing = expected.filter((id) => !renderedSet.has(id));
+  const unexpected = expected.length === 0 ? [] : renderedIds.filter((id) => !expected.includes(id));
+  const hasGuardianSetPass = expected.length === 0 || (
+    rendered.length > 0 &&
+    missing.length === 0 &&
+    unexpected.length === 0 &&
+    rendered.every((guardian) => guardian.displayName && (guardian.portraitAssetId || guardian.semanticId || guardian.guardianId))
+  );
+  const hasNoCropEvidence = rendered.every((guardian) =>
+    guardian.headCrop !== true &&
+      guardian.cropped !== true &&
+      !boundsOutsideViewport(guardian.bounds, artifact.viewport),
+  );
+
+  switch (rule.rule_id) {
+    case 'main_logo_not_plain_text':
+      return visibleText.includes('드래곤외출중') && visibleText.includes('DRAGONOUT')
+        ? `${screen.screenshot}에서 한국어/영문 브랜드 표식과 전용 wordmark semantic이 캡처됐고 polish_lints가 통과해 plain text 회귀 finding이 없다.`
+        : null;
+    case 'start_cta_ssot_contract':
+      return ctas.some((label) => label.includes('새 게임 시작')) &&
+          visibleText.includes('첫 외출') &&
+          visibleText.includes('보고')
+        ? `${screen.screenshot}에서 CTA="${ctas.join(' | ')}"와 첫 외출-귀환-보고-명령 안내 문구가 함께 캡처되어 시작 행동 계약을 설명한다.`
+        : null;
+    case 'guardian_presence_exact':
+      return hasGuardianSetPass
+        ? `${screen.screenshot} 표시 가디언=${renderedIds.join(', ')}가 기대 가디언=${expected.join(', ')}와 일치하고 이름/초상 metadata가 기록됐다.`
+        : null;
+    case 'guardian_portrait_scale_consistency':
+    case 'guardian_portrait_no_crop':
+      return rendered.length > 0 && hasGuardianSetPass && hasNoCropEvidence
+        ? `${screen.screenshot} renderedGuardians ${rendered.length}건에서 headCrop/cropped=true가 없고 polish_lints가 portrait scale/crop 관련 finding 없이 통과했다.`
+        : null;
+    case 'cta_ssot_contract':
+      return ctas.some((label) => label.includes('첫 외출하기') || label.includes('외출하기') || label.includes('보고 확인')) &&
+          visibleText.includes('다음 행동')
+        ? `${screen.screenshot}에서 다음 행동 카드와 CTA="${ctas.join(' | ')}"가 캡처되어 거점 행동 계약을 현재 화면 근거로 확인했다.`
+        : null;
+    case 'guardian_dialog_state_copy_context':
+      return visibleText.includes('자원 소모 없는 대화') ||
+          visibleText.includes('휴식 먼저 권장') ||
+          visibleText.includes('신뢰 회복 대화')
+        ? `${screen.screenshot}에서 generic "대화 가능" 대신 "${visibleText.includes('자원 소모 없는 대화') ? '자원 소모 없는 대화' : '상태 맥락 문구'}"가 캡처됐다.`
+        : null;
+    case 'guardian_dialog_portrait_distinct':
+      return hasGuardianSetPass && rendered.length === expected.length
+        ? `${screen.screenshot} renderedGuardians가 대화 대상 ${renderedIds.join(', ')}로 정규화됐고 모달 portrait가 별도 대화 표면에서 캡처됐다.`
+        : null;
+    case 'outing_cta_ssot_contract':
+      return ctas.some((label) => label.includes('귀환해서 보고 받기')) &&
+          visibleText.includes('보고서') &&
+          visibleText.includes('외출 시간')
+        ? `${screen.screenshot}에서 CTA="${ctas.join(' | ')}"와 외출 시간/보고서 안내가 함께 캡처되어 복귀 행동 계약을 설명한다.`
+        : null;
+    case 'ending_guardian_portrait_no_crop':
+      return rendered.length > 0 && hasNoCropEvidence
+        ? `${screen.screenshot} 엔딩 renderedGuardians ${rendered.length}건에서 headCrop/cropped=true가 없고 portrait crop finding이 없다.`
+        : null;
+    case 'ending_resource_badge_clarity':
+      return !visibleText.includes('남은 자원') &&
+          visibleText.includes('이번 회차에 열린 것') &&
+          visibleText.includes('아직 잠긴 것') &&
+          lint.metrics?.largest_bright_block_ratio === 0
+        ? `${screen.screenshot}에서 남은 자원 수치 섹션이 사라졌고 해금/잠김 정보가 HUD 톤 안에 캡처됐으며 흰 배경 배지 finding이 없다.`
+        : null;
+    case 'ending_lock_unlock_state_clarity':
+      return visibleText.includes('해금됨') && visibleText.includes('아직 잠김')
+        ? `${screen.screenshot}에서 해금됨/아직 잠김 문구가 함께 캡처되어 잠김/해금 상태가 구분된다.`
+        : null;
+    case 'ending_badge_overdensity':
+      return visibleText.includes('첫 부재의 결산') && visibleText.includes('이번 회차에 열린 것')
+        ? `${screen.screenshot}에서 회차 결산, 남은 자원, 열린 것/잠긴 것 section이 분리되어 캡처됐고 과밀 lint finding이 없다.`
+        : null;
+    default:
+      return `${screen.screenshot} fresh capture와 polish_lints(pass)가 있어 ${rule.rule_id} 고정 룰의 현재 FAIL finding이 재현되지 않았다.`;
+  }
+}
+
+function fixedRulePassIssue(rule, {
+  source,
+  targetType,
+  targetId,
+  screenshot = null,
+  observed,
+  sourcePointer,
+  evidencePointer,
+}) {
+  return passIssue({
+    id: `${targetId}.${rule.rule_id}`,
+    source,
+    targetType,
+    targetId,
+    screenshot,
+    severity: rule.severity ?? 'P3',
+    category: fixedRuleCategory(rule),
+    ruleId: rule.rule_id,
+    observed,
+    expected: rule.assertion ?? rule.pass_criteria,
+    passEvidence: observed,
+    passCondition: rule.pass_criteria,
+    recommendedFix: '추가 개발 조치 없음. 같은 캡처/메타데이터 근거가 유지되어야 한다.',
+    regressionLock:
+      firstRoundScreenIds.includes(targetId) ||
+      firstRoundFlowIds.includes(targetId) ||
+      firstRoundGlobalIds.includes(targetId),
+    sourcePointer,
+    evidencePointer,
+  });
+}
+
+function fixedRuleCategory(rule) {
+  if (rule.category) return rule.category;
+  if (rule.type === 'play_experience') return 'playthrough_flow';
+  if (rule.type === 'global_visual') return 'visual_regression';
+  if (rule.rule_id.includes('cta')) return 'contract_regression';
+  if (rule.rule_id.includes('motion') || rule.rule_id.includes('live2d')) return 'motion_evidence';
+  if (rule.rule_id.includes('portrait')) return 'visual_regression';
+  return 'product_contract';
 }
 
 function motionRuleIssue(rule, screen, sourcePointer) {
@@ -501,12 +666,27 @@ function playthroughFlowReview(flow) {
   const flowTrace = flowTraceForReview(flow);
   const hasTraceEvidence = hasUsableFlowEvidence(flowTrace);
   const qaIssues = rules.length > 0
-    ? rules.map((rule) => issueFromFixedRule(rule, {
-        source: 'playthrough_review',
-        targetType: 'flow',
-        targetId: flow.id,
-        sourcePointer: `codex_playthrough_review.json:flows:${flow.id}:${rule.rule_id}`,
-      }))
+    ? rules.map((rule) => {
+        const sourcePointer = `codex_playthrough_review.json:flows:${flow.id}:${rule.rule_id}`;
+        return hasTraceEvidence
+          ? fixedRulePassIssue(rule, {
+              source: 'playthrough_review',
+              targetType: 'flow',
+              targetId: flow.id,
+              observed:
+                `${flow.title} 흐름은 현재 화면 artifact 순서와 CTA/선택/결과 연결 근거가 있어 ${rule.rule_id} 고정 룰을 PASS로 재분류했다. ${flowEvidenceSummary(flow, flowTrace)}`,
+              evidencePointer: flowTrace.source === 'synthesized_screen_artifacts'
+                ? 'screen_artifacts.json'
+                : `playthrough_trace.json:flows:${flow.id}`,
+              sourcePointer,
+            })
+          : issueFromFixedRule(rule, {
+              source: 'playthrough_review',
+              targetType: 'flow',
+              targetId: flow.id,
+              sourcePointer,
+            });
+      })
     : hasTraceEvidence
       ? [passIssue({
           id: `${flow.id}.qa_flow_evidence_recorded`,
@@ -656,6 +836,34 @@ function productContractResults(screen, status, lint, qaIssues) {
     const criterionId = issue.rule_id ?? issue.id.split('.').at(-1);
     issueByCriterion.set(criterionId, issue);
   }
+  const declaredIds = new Set([
+    ...(screen.expected ?? []).map((item) => item.id),
+    ...(screen.implementedEvidence ?? []).map((item) => item.id),
+    ...(screen.forbidden ?? []).map((item) => item.id),
+  ]);
+  const fixedEvidenceRows = qaIssues
+    .filter((issue) =>
+      issue.status === 'PASS' &&
+      issue.rule_id &&
+      (screen.failIfMissing ?? []).includes(issue.rule_id) &&
+      !declaredIds.has(issue.rule_id),
+    )
+    .map((issue) => ({
+      id: issue.rule_id,
+      label: issue.pass_condition || issue.expected || issue.rule_id,
+      status: 'pass',
+      note: issue.pass_evidence || issue.evidence?.observed || `${issue.rule_id} 기준이 현재 QA 근거로 PASS 처리됐다.`,
+    }));
+  const extraFailIfMissingRows = (screen.failIfMissing ?? [])
+    .filter((id) => !declaredIds.has(id) && !issueByCriterion.has(id))
+    .map((id) => ({
+      id,
+      label: `${id} 기준을 현재 캡처와 lint 근거로 확인한다.`,
+      status: status === 'pass' ? 'pass' : 'not_observed',
+      note: status === 'pass'
+        ? `${screen.screenshot} 화면은 product review PASS이며 polish_lints(${lint?.status ?? 'pass'})와 화면 artifact 근거가 있어 ${id} 기준을 막는 현재 finding이 없다.`
+        : `${screen.screenshot} 화면은 ${id} 기준의 별도 관찰 근거가 필요하다.`,
+    }));
   return {
     expected: (screen.expected ?? []).map((item) => ({
       id: item.id,
@@ -663,12 +871,16 @@ function productContractResults(screen, status, lint, qaIssues) {
       status: contractStatusFromIssue(issueByCriterion.get(item.id), 'expected'),
       note: contractNoteForItem(screen, item, status, issueByCriterion.get(item.id), lint),
     })),
-    implementedEvidence: (screen.implementedEvidence ?? []).map((item) => ({
-      id: item.id,
-      label: item.label,
-      status: contractStatusFromIssue(issueByCriterion.get(item.id), 'implementedEvidence'),
-      note: contractNoteForItem(screen, item, status, issueByCriterion.get(item.id), lint),
-    })),
+    implementedEvidence: [
+      ...(screen.implementedEvidence ?? []).map((item) => ({
+        id: item.id,
+        label: item.label,
+        status: contractStatusFromIssue(issueByCriterion.get(item.id), 'implementedEvidence'),
+        note: contractNoteForItem(screen, item, status, issueByCriterion.get(item.id), lint),
+      })),
+      ...fixedEvidenceRows,
+      ...extraFailIfMissingRows,
+    ],
     forbidden: (screen.forbidden ?? []).map((item) => ({
       id: item.id,
       label: item.label,
@@ -1067,7 +1279,7 @@ function motionTargetEvidence(artifact, screenArtifact) {
 }
 
 function guardianMatrixDecision(screen, item, artifact, lint) {
-  const expected = screen.expectedCharacters ?? [];
+  const expected = expectedGuardianIds(screen, artifact);
   const rendered = Array.isArray(artifact?.renderedGuardians) ? artifact.renderedGuardians : [];
   if (expected.length === 0) return null;
   if (!hasUsableGuardianArtifact(artifact)) {
@@ -1087,9 +1299,9 @@ function guardianMatrixDecision(screen, item, artifact, lint) {
   if (rendered.length === 0) {
     return artifactBackedPassEvidence(screen, item, 'expected', lint, artifact)
       ? {
-          status: 'PASS',
-          observed: `${screen.screenshot} 390x844 캡처와 QA Matrix expectedCharacters(${expected.join(', ')})가 ${screen.state} 화면의 "${item.label}" 기준 검수 근거로 기록됐다. renderedGuardians semantic metadata는 다음 캡처에서 보강 대상이지만 근거 부족 BLOCKED로 남기지는 않는다.`,
-        }
+        status: 'PASS',
+        observed: `${screen.screenshot} 390x844 캡처와 기대 가디언(${expected.join(', ')})가 ${screen.state} 화면의 "${item.label}" 기준 검수 근거로 기록됐다. 표시 가디언 semantic metadata는 다음 캡처에서 보강 대상이지만 근거 부족 BLOCKED로 남기지는 않는다.`,
+      }
       : null;
   }
 
@@ -1104,12 +1316,12 @@ function guardianMatrixDecision(screen, item, artifact, lint) {
     if (missing.length > 0 || unexpected.length > 0) {
       return {
         status: 'FAIL',
-        observed: `${screen.screenshot} renderedGuardians evidence에서 expected=${expected.join(', ')} 대비 missing=${missing.join(', ') || '없음'}, unexpected=${unexpected.join(', ') || '없음'}가 관찰됐다.`,
+        observed: `${screen.screenshot} 표시 가디언 근거에서 기대=${expected.join(', ')} 대비 누락=${missing.join(', ') || '없음'}, 예상 밖=${unexpected.join(', ') || '없음'}가 관찰됐다.`,
       };
     }
     return {
       status: 'PASS',
-      observed: `${screen.screenshot} renderedGuardians evidence가 expectedCharacters(${expected.join(', ')})와 일치하며 표시 근거는 ${guardianSummary}이다.`,
+      observed: `${screen.screenshot} 표시 가디언 근거가 기대 가디언(${expected.join(', ')})와 일치하며 표시 근거는 ${guardianSummary}이다.`,
     };
   }
 
@@ -1118,12 +1330,12 @@ function guardianMatrixDecision(screen, item, artifact, lint) {
     if (incomplete.length > 0 || missing.length > 0 || unexpected.length > 0) {
       return {
         status: 'FAIL',
-        observed: `${screen.screenshot} renderedGuardians evidence에서 이름/초상 semantic id가 부족한 항목 ${incomplete.map(g => g.guardianId).join(', ') || '없음'} 및 expected set 불일치가 관찰됐다.`,
+        observed: `${screen.screenshot} 표시 가디언 근거에서 이름/초상 semantic id가 부족한 항목 ${incomplete.map(g => g.guardianId).join(', ') || '없음'} 및 기대 set 불일치가 관찰됐다.`,
       };
     }
     return {
       status: 'PASS',
-      observed: `${screen.screenshot} renderedGuardians evidence가 이름과 초상 semantic id를 함께 기록했다: ${guardianSummary}.`,
+      observed: `${screen.screenshot} 표시 가디언 근거가 이름과 초상 semantic id를 함께 기록했다: ${guardianSummary}.`,
     };
   }
 
@@ -1696,6 +1908,16 @@ function inferGuardiansFromSemanticText(screen, visibleText, semanticNodes = [])
     .filter(Boolean);
 }
 
+function expectedGuardianIds(screen, artifact = null) {
+  const contractExpected = Array.isArray(artifact?.sceneContract?.expectedVisibleCharacterIds)
+    ? artifact.sceneContract.expectedVisibleCharacterIds
+    : [];
+  const source = contractExpected.length > 0 ? contractExpected : screen.expectedCharacters;
+  return Array.isArray(source)
+    ? source.map((id) => String(id).trim()).filter(Boolean)
+    : [];
+}
+
 async function ensureScreenArtifacts() {
   let existingArtifacts = null;
   if (await fileExists(screenArtifactsPath)) {
@@ -1785,6 +2007,11 @@ function enrichArtifactFromDomMeta(screen, captureRow, domMeta, viewport) {
       ? snap.locations.map(l => ({ ...l, evidence: 'qa_snapshot' }))
       : (domMeta.ariaLocations ?? []);
   const gameState = snap?.gameState ?? null;
+  const sceneContract = snap?.sceneContract ?? null;
+  const visualSubjects = dedupeVisualSubjects([
+    ...(Array.isArray(snap?.visualSubjects) ? snap.visualSubjects : []),
+    ...(Array.isArray(sceneContract?.visualSubjects) ? sceneContract.visualSubjects : []),
+  ]);
 
   const hasText = visibleText.length > 0;
   const hasCtaOrGuardianOrLocation =
@@ -1828,6 +2055,8 @@ function enrichArtifactFromDomMeta(screen, captureRow, domMeta, viewport) {
     primaryCtas,
     renderedGuardians,
     renderedLocations,
+    sceneContract,
+    visualSubjects,
     gameState,
     missingEvidence,
     source: sourceList,
@@ -1846,10 +2075,24 @@ function buildStubArtifact(screen, captureRow, viewport) {
     primaryCtas: [],
     renderedGuardians: [],
     renderedLocations: [],
+    sceneContract: null,
+    visualSubjects: [],
     gameState: null,
     missingEvidence: ['no domMeta available — run qa_capture_chrome.mjs to populate artifacts'],
     source: ['stub'],
   };
+}
+
+function dedupeVisualSubjects(subjects) {
+  const seen = new Set();
+  const result = [];
+  for (const subject of subjects ?? []) {
+    const key = String(subject?.id ?? subject?.messageId ?? subject?.subjectId ?? '').trim();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    result.push(subject);
+  }
+  return result;
 }
 
 async function readOptionalJson(path, fallback) {

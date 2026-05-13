@@ -181,6 +181,7 @@ const finalPassEligible =
   regressionLockScreens.every((screen) => screen.status === 'PASS') &&
   flowRows.every((row) => row.finalVerdict === 'PASS');
 const finalStatus = finalPassEligible ? 'PASS' : qaMode === 'fast' ? '부분 검수 완료' : 'QA 미통과';
+const validationExpectedStatus = finalPassEligible ? 'pass' : 'not_pass';
 
 const payload = {
   generated_at: new Date().toISOString(),
@@ -1343,7 +1344,7 @@ function renderMarkdownReport() {
   const lockLines = regressionLockScreens.length
     ? regressionLockScreens.map((screen) => `- **${screen.id}**: ${screen.status} (${(screen.checks ?? []).length} checks, queue ${(screen.dev_queue_item_ids ?? []).length})`)
     : ['- regression_lock.json 미생성'];
-  return `# Dragonout QA Report\n\n생성 시각: ${new Date().toISOString()}\n\n## 최종 상태\n\n- 상태: ${finalStatus}\n- Dev Queue FAIL: ${devQueueItems.length}\n- QA Queue BLOCKED: ${qaQueueCounts.blocked}\n- RULE_INVALID: ${qaQueueCounts.rule_invalid}\n- SKIP: ${qaQueueCounts.skip}\n- LOW_CONFIDENCE: 0\n- Regression Lock FAIL: ${regressionLockScreens.filter((screen) => screen.status === 'FAIL').length}/${regressionLockScreens.length}\n\n## 수정 큐\n\n${queueLines.join('\n')}\n\n## QA Queue\n\n${queueGroupLines.join('\n')}\n\n## Regression Lock\n\n${lockLines.join('\n')}\n\n## 검증 명령\n\n- \`node tools/qa_build_dev_queue.mjs\`\n- \`QA_MODE=${qaMode} QA_EXPECT_FINAL_STATUS=not_pass node tools/qa_validate_report.mjs\`\n`;
+  return `# Dragonout QA Report\n\n생성 시각: ${new Date().toISOString()}\n\n## 최종 상태\n\n- 상태: ${finalStatus}\n- Dev Queue FAIL: ${devQueueItems.length}\n- QA Queue BLOCKED: ${qaQueueCounts.blocked}\n- RULE_INVALID: ${qaQueueCounts.rule_invalid}\n- SKIP: ${qaQueueCounts.skip}\n- LOW_CONFIDENCE: 0\n- Regression Lock FAIL: ${regressionLockScreens.filter((screen) => screen.status === 'FAIL').length}/${regressionLockScreens.length}\n\n## 수정 큐\n\n${queueLines.join('\n')}\n\n## QA Queue\n\n${queueGroupLines.join('\n')}\n\n## Regression Lock\n\n${lockLines.join('\n')}\n\n## 검증 명령\n\n- \`node tools/qa_build_dev_queue.mjs\`\n- \`QA_MODE=${qaMode} QA_EXPECT_FINAL_STATUS=${validationExpectedStatus} node tools/qa_validate_report.mjs\`\n`;
 }
 
 function ruleQueueItem(type, targetLabel, rule, finding) {
@@ -1648,8 +1649,15 @@ function renderCandidateScreenshot(candidate) {
 }
 
 function renderAcceptedCandidateSection() {
+  const fixedRuleItems = fixedRules.map((rule) => (
+    `<li><strong>${escapeHtml(rule.rule_id)}</strong>: ${escapeHtml(rule.assertion)}<br>` +
+    `<span class="muted">대상: ${escapeHtml(rule.target_id)} / 통과 기준: ${escapeHtml(rule.pass_criteria)}</span></li>`
+  ));
+  const fixedRuleList = fixedRuleItems.length
+    ? `<h3>repo-tracked 고정 QA 룰</h3><p class="section-note">현재 검출 여부와 별개로, 고정 QA rule id를 리포트에서 추적합니다.</p><ul>${fixedRuleItems.join('')}</ul>`
+    : '';
   if (acceptedCalibrationCandidates.length === 0) {
-    return '<p class="muted">accepted 후보가 없습니다.</p>';
+    return `${fixedRuleList}<p class="muted">accepted 후보가 없습니다.</p>`;
   }
   const items = acceptedCalibrationCandidates.map((candidate) => {
     const rules = (candidate.learned_rules ?? [])
@@ -1657,7 +1665,7 @@ function renderAcceptedCandidateSection() {
       .join('');
     return `<li>${escapeHtml(candidate.candidate_id)} ${escapeHtml(candidate.target_label ?? '')}: ${escapeHtml(candidate.suggested_fix ?? '')}${rules ? `<ul>${rules}</ul>` : ''}</li>`;
   });
-  return `<ul>${items.join('')}</ul>`;
+  return `${fixedRuleList}<h3>accepted 후보</h3><ul>${items.join('')}</ul>`;
 }
 
 function acceptedCalibrationQueue(type) {

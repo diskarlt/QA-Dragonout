@@ -472,7 +472,7 @@ function fixedScreenRulePassEvidence(rule, screen) {
   const visibleText = (artifact.visibleText ?? []).join(' ');
   const ctas = (artifact.primaryCtas ?? []).map((cta) => String(cta.label ?? '')).filter(Boolean);
   const rendered = Array.isArray(artifact.renderedGuardians) ? artifact.renderedGuardians : [];
-  const expected = Array.isArray(screen.expectedCharacters) ? screen.expectedCharacters.map(String) : [];
+  const expected = expectedGuardianIds(screen, artifact);
   const renderedIds = rendered.map((guardian) => String(guardian.guardianId ?? guardian.id ?? '')).filter(Boolean);
   const renderedSet = new Set(renderedIds);
   const missing = expected.filter((id) => !renderedSet.has(id));
@@ -502,7 +502,7 @@ function fixedScreenRulePassEvidence(rule, screen) {
         : null;
     case 'guardian_presence_exact':
       return hasGuardianSetPass
-        ? `${screen.screenshot} renderedGuardians=${renderedIds.join(', ')}가 expectedCharacters=${expected.join(', ')}와 일치하고 이름/초상 metadata가 기록됐다.`
+        ? `${screen.screenshot} 표시 가디언=${renderedIds.join(', ')}가 기대 가디언=${expected.join(', ')}와 일치하고 이름/초상 metadata가 기록됐다.`
         : null;
     case 'guardian_portrait_scale_consistency':
     case 'guardian_portrait_no_crop':
@@ -535,8 +535,11 @@ function fixedScreenRulePassEvidence(rule, screen) {
         ? `${screen.screenshot} 엔딩 renderedGuardians ${rendered.length}건에서 headCrop/cropped=true가 없고 portrait crop finding이 없다.`
         : null;
     case 'ending_resource_badge_clarity':
-      return visibleText.includes('남은 자원') && lint.metrics?.largest_bright_block_ratio === 0
-        ? `${screen.screenshot}에서 남은 자원 section과 HUD tone 배지가 캡처됐고 bright block metric이 0으로 흰 배경 배지 finding이 없다.`
+      return !visibleText.includes('남은 자원') &&
+          visibleText.includes('이번 회차에 열린 것') &&
+          visibleText.includes('아직 잠긴 것') &&
+          lint.metrics?.largest_bright_block_ratio === 0
+        ? `${screen.screenshot}에서 남은 자원 수치 섹션이 사라졌고 해금/잠김 정보가 HUD 톤 안에 캡처됐으며 흰 배경 배지 finding이 없다.`
         : null;
     case 'ending_lock_unlock_state_clarity':
       return visibleText.includes('해금됨') && visibleText.includes('아직 잠김')
@@ -1276,7 +1279,7 @@ function motionTargetEvidence(artifact, screenArtifact) {
 }
 
 function guardianMatrixDecision(screen, item, artifact, lint) {
-  const expected = screen.expectedCharacters ?? [];
+  const expected = expectedGuardianIds(screen, artifact);
   const rendered = Array.isArray(artifact?.renderedGuardians) ? artifact.renderedGuardians : [];
   if (expected.length === 0) return null;
   if (!hasUsableGuardianArtifact(artifact)) {
@@ -1296,9 +1299,9 @@ function guardianMatrixDecision(screen, item, artifact, lint) {
   if (rendered.length === 0) {
     return artifactBackedPassEvidence(screen, item, 'expected', lint, artifact)
       ? {
-          status: 'PASS',
-          observed: `${screen.screenshot} 390x844 캡처와 QA Matrix expectedCharacters(${expected.join(', ')})가 ${screen.state} 화면의 "${item.label}" 기준 검수 근거로 기록됐다. renderedGuardians semantic metadata는 다음 캡처에서 보강 대상이지만 근거 부족 BLOCKED로 남기지는 않는다.`,
-        }
+        status: 'PASS',
+        observed: `${screen.screenshot} 390x844 캡처와 기대 가디언(${expected.join(', ')})가 ${screen.state} 화면의 "${item.label}" 기준 검수 근거로 기록됐다. 표시 가디언 semantic metadata는 다음 캡처에서 보강 대상이지만 근거 부족 BLOCKED로 남기지는 않는다.`,
+      }
       : null;
   }
 
@@ -1313,12 +1316,12 @@ function guardianMatrixDecision(screen, item, artifact, lint) {
     if (missing.length > 0 || unexpected.length > 0) {
       return {
         status: 'FAIL',
-        observed: `${screen.screenshot} renderedGuardians evidence에서 expected=${expected.join(', ')} 대비 missing=${missing.join(', ') || '없음'}, unexpected=${unexpected.join(', ') || '없음'}가 관찰됐다.`,
+        observed: `${screen.screenshot} 표시 가디언 근거에서 기대=${expected.join(', ')} 대비 누락=${missing.join(', ') || '없음'}, 예상 밖=${unexpected.join(', ') || '없음'}가 관찰됐다.`,
       };
     }
     return {
       status: 'PASS',
-      observed: `${screen.screenshot} renderedGuardians evidence가 expectedCharacters(${expected.join(', ')})와 일치하며 표시 근거는 ${guardianSummary}이다.`,
+      observed: `${screen.screenshot} 표시 가디언 근거가 기대 가디언(${expected.join(', ')})와 일치하며 표시 근거는 ${guardianSummary}이다.`,
     };
   }
 
@@ -1327,12 +1330,12 @@ function guardianMatrixDecision(screen, item, artifact, lint) {
     if (incomplete.length > 0 || missing.length > 0 || unexpected.length > 0) {
       return {
         status: 'FAIL',
-        observed: `${screen.screenshot} renderedGuardians evidence에서 이름/초상 semantic id가 부족한 항목 ${incomplete.map(g => g.guardianId).join(', ') || '없음'} 및 expected set 불일치가 관찰됐다.`,
+        observed: `${screen.screenshot} 표시 가디언 근거에서 이름/초상 semantic id가 부족한 항목 ${incomplete.map(g => g.guardianId).join(', ') || '없음'} 및 기대 set 불일치가 관찰됐다.`,
       };
     }
     return {
       status: 'PASS',
-      observed: `${screen.screenshot} renderedGuardians evidence가 이름과 초상 semantic id를 함께 기록했다: ${guardianSummary}.`,
+      observed: `${screen.screenshot} 표시 가디언 근거가 이름과 초상 semantic id를 함께 기록했다: ${guardianSummary}.`,
     };
   }
 
@@ -1903,6 +1906,16 @@ function inferGuardiansFromSemanticText(screen, visibleText, semanticNodes = [])
       };
     })
     .filter(Boolean);
+}
+
+function expectedGuardianIds(screen, artifact = null) {
+  const contractExpected = Array.isArray(artifact?.sceneContract?.expectedVisibleCharacterIds)
+    ? artifact.sceneContract.expectedVisibleCharacterIds
+    : [];
+  const source = contractExpected.length > 0 ? contractExpected : screen.expectedCharacters;
+  return Array.isArray(source)
+    ? source.map((id) => String(id).trim()).filter(Boolean)
+    : [];
 }
 
 async function ensureScreenArtifacts() {

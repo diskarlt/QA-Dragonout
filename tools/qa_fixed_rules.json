@@ -154,10 +154,10 @@
       "source_candidate_id": "CAL-F03",
       "type": "screen_problem",
       "target_id": "ending_cycle1",
-      "assertion": "엔딩 결산의 자원/해금/결산 정보가 흰 비트맵 배지처럼 떠 보이면 FAIL이다.",
-      "observed_evidence": "엔딩 결산 화면에서 자원/해금 정보가 HUD 톤과 분리된 흰 배경 배지 패턴으로 보일 수 있다.",
-      "pass_criteria": "자원/해금 정보가 HUD 톤과 통합되고 흰 배경 배지 패턴이 없어야 한다.",
-      "recommended_fix": "엔딩 자원·해금 정보 배지 배경을 HUD 톤에 맞게 수정한다.",
+      "assertion": "엔딩 결산은 남은 자원 수치 배지를 노출하지 않고 해금/잠김 정보를 HUD 톤 안에서 보여야 한다.",
+      "observed_evidence": "엔딩 결산 화면에서 남은 자원 수치 배지가 payoff보다 목록형 정보처럼 읽힐 수 있다.",
+      "pass_criteria": "남은 자원 섹션이 없고 해금/잠김 정보가 HUD 톤과 통합되며 흰 배경 배지 패턴이 없어야 한다.",
+      "recommended_fix": "엔딩 자원 수치 요약을 제거하고 해금/잠김 정보만 HUD 톤 안에서 유지한다.",
       "severity": "P1"
     },
     {

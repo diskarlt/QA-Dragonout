@@ -33,7 +33,7 @@ const speakerContract = {
   });
   assert.equal(issues.length, 1);
   assert.equal(issues[0].status, 'PASS');
-  assert.match(issues[0].evidence.observed, /expected=\[lamir\], actual=\[lamir\]/);
+  assert.match(issues[0].evidence.observed, /예상=\[lamir\], 실제=\[lamir\]/);
 }
 
 {
@@ -49,7 +49,7 @@ const speakerContract = {
   assert.equal(issues.length, 1);
   assert.equal(issues[0].status, 'FAIL');
   assert.equal(issues[0].rule_id, 'speaker_visible_only_contract');
-  assert.match(issues[0].evidence.observed, /unexpected=\[kael\]/);
+  assert.match(issues[0].evidence.observed, /예상 밖=\[kael\]/);
 }
 
 {
@@ -108,7 +108,7 @@ const visitorSubject = {
   assert.equal(issues.length, 1);
   assert.equal(issues[0].status, 'FAIL');
   assert.equal(issues[0].rule_id, 'quantitative_crop_contract');
-  assert.match(issues[0].evidence.observed, /headVisibleFraction=0/);
+  assert.match(issues[0].evidence.observed, /머리 노출률=0/);
 }
 
 {
@@ -128,8 +128,8 @@ const visitorSubject = {
   );
   assert.equal(issues.length, 1);
   assert.equal(issues[0].status, 'PASS');
-  assert.match(issues[0].evidence.observed, /headVisibleFraction=1/);
-  assert.match(issues[0].evidence.observed, /coreVisibleFraction=1/);
+  assert.match(issues[0].evidence.observed, /머리 노출률=1/);
+  assert.match(issues[0].evidence.observed, /핵심 실루엣 노출률=1/);
 }
 
 {

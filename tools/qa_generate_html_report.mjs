@@ -1649,8 +1649,15 @@ function renderCandidateScreenshot(candidate) {
 }
 
 function renderAcceptedCandidateSection() {
+  const fixedRuleItems = fixedRules.map((rule) => (
+    `<li><strong>${escapeHtml(rule.rule_id)}</strong>: ${escapeHtml(rule.assertion)}<br>` +
+    `<span class="muted">대상: ${escapeHtml(rule.target_id)} / 통과 기준: ${escapeHtml(rule.pass_criteria)}</span></li>`
+  ));
+  const fixedRuleList = fixedRuleItems.length
+    ? `<h3>repo-tracked 고정 QA 룰</h3><p class="section-note">현재 검출 여부와 별개로, 고정 QA rule id를 리포트에서 추적합니다.</p><ul>${fixedRuleItems.join('')}</ul>`
+    : '';
   if (acceptedCalibrationCandidates.length === 0) {
-    return '<p class="muted">accepted 후보가 없습니다.</p>';
+    return `${fixedRuleList}<p class="muted">accepted 후보가 없습니다.</p>`;
   }
   const items = acceptedCalibrationCandidates.map((candidate) => {
     const rules = (candidate.learned_rules ?? [])
@@ -1658,7 +1665,7 @@ function renderAcceptedCandidateSection() {
       .join('');
     return `<li>${escapeHtml(candidate.candidate_id)} ${escapeHtml(candidate.target_label ?? '')}: ${escapeHtml(candidate.suggested_fix ?? '')}${rules ? `<ul>${rules}</ul>` : ''}</li>`;
   });
-  return `<ul>${items.join('')}</ul>`;
+  return `${fixedRuleList}<h3>accepted 후보</h3><ul>${items.join('')}</ul>`;
 }
 
 function acceptedCalibrationQueue(type) {

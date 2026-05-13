@@ -84,9 +84,9 @@ export function evaluateSpeakerContract(screen, artifact) {
 
   const mismatch = setMismatch(expected, actual);
   const observed =
-    `${screen.screenshot} sceneContract speaker 검증: ` +
-    `expected=[${expected.join(', ')}], actual=[${actual.join(', ')}], ` +
-    `missing=[${mismatch.missing.join(', ') || '없음'}], unexpected=[${mismatch.unexpected.join(', ') || '없음'}].`;
+    `${screen.screenshot} sceneContract 화자 표시 검증: ` +
+    `예상=[${expected.join(', ')}], 실제=[${actual.join(', ')}], ` +
+    `누락=[${mismatch.missing.join(', ') || '없음'}], 예상 밖=[${mismatch.unexpected.join(', ') || '없음'}].`;
 
   if (mismatch.missing.length > 0 || mismatch.unexpected.length > 0) {
     return [
@@ -193,11 +193,11 @@ function visualSubjectIssue(screen, artifact, subject) {
   const sourcePointer = `codex_product_review.json:screens:${screen.id}:quantitative_crop_contract`;
   const evidencePointer = `screen_artifacts/${screen.id}.json:visualSubjects:${subject.id ?? subject.messageId ?? subject.subjectId ?? 'unknown'}`;
   const observed =
-    `${screen.screenshot} ${subjectLabel} crop contract: ` +
-    `fit=${subject.frame?.fit ?? 'unknown'}, ` +
-    `headVisibleFraction=${formatNumber(assessment.headVisibleFraction)}, ` +
-    `coreVisibleFraction=${formatNumber(assessment.coreVisibleFraction)}, ` +
-    `minRequired=${formatNumber(assessment.minRequired)}.`;
+    `${screen.screenshot}에서 ${subjectLabel} 정량 크롭 기준을 확인했다. ` +
+    `프레임 맞춤=${subject.frame?.fit ?? 'unknown'}, ` +
+    `머리 노출률=${formatNumber(assessment.headVisibleFraction)}, ` +
+    `핵심 실루엣 노출률=${formatNumber(assessment.coreVisibleFraction)}, ` +
+    `최소 기준=${formatNumber(assessment.minRequired)}.`;
 
   if (assessment.status === 'BLOCKED') {
     return [
@@ -210,13 +210,13 @@ function visualSubjectIssue(screen, artifact, subject) {
         severity: 'P2',
         category: 'quantitative_crop_contract',
         ruleId: 'quantitative_crop_contract',
-        observed: `${observed} head/core visible fraction 또는 bounds metadata가 부족해 이미지 감상으로 대신 판정하지 않는다.`,
-        expected: `${subjectLabel}는 head/core visible fraction 수치로 crop 여부를 판정해야 한다.`,
+        observed: `${observed} 머리/핵심 실루엣 노출률 또는 경계 metadata가 부족해 이미지 감상으로 대신 판정하지 않는다.`,
+        expected: `${subjectLabel}는 머리/핵심 실루엣 노출률 수치로 crop 여부를 판정해야 한다.`,
         missingEvidence: assessment.missingEvidence,
         requiredArtifact: ['screen_artifacts.json', `screen_artifacts/${screen.id}.json`],
         blockedReason: '정량 crop metadata가 없어 이미지 캡처를 보고 캐릭터 crop을 추정하지 않는다.',
         passCondition:
-          'headVisibleFraction과 coreVisibleFraction이 각각 minRequired 이상이어야 한다.',
+          '머리 노출률과 핵심 실루엣 노출률이 각각 최소 기준 이상이어야 한다.',
         recommendedFix: '앱 QA snapshot에 subject bounds, frame fit, visible fraction metadata를 기록한다.',
         sourcePointer,
         evidencePointer,
@@ -239,11 +239,11 @@ function visualSubjectIssue(screen, artifact, subject) {
           screenshot: screen.screenshot,
           observed,
         },
-        expected: `${subjectLabel}의 머리와 핵심 실루엣은 minRequired 이상 화면에 노출되어야 한다.`,
+        expected: `${subjectLabel}의 머리와 핵심 실루엣은 최소 기준 이상 화면에 노출되어야 한다.`,
         recommended_fix:
-          '해당 이미지의 frame fit, alignment, 카드 비율 또는 asset bounds를 조정해 head/core visible fraction을 기준 이상으로 올린다.',
+          '해당 이미지의 frame fit, alignment, 카드 비율 또는 asset bounds를 조정해 머리/핵심 실루엣 노출률을 기준 이상으로 올린다.',
         pass_condition:
-          'headVisibleFraction과 coreVisibleFraction이 각각 minRequired 이상이어야 한다.',
+          '머리 노출률과 핵심 실루엣 노출률이 각각 최소 기준 이상이어야 한다.',
         regression_lock: false,
         source_pointer: sourcePointer,
         evidence_pointer: evidencePointer,
@@ -264,7 +264,7 @@ function visualSubjectIssue(screen, artifact, subject) {
       observed,
       expected: `${subjectLabel}의 머리와 핵심 실루엣은 정량 crop 기준을 통과해야 한다.`,
       passCondition:
-        'headVisibleFraction과 coreVisibleFraction이 각각 minRequired 이상이어야 한다.',
+        '머리 노출률과 핵심 실루엣 노출률이 각각 최소 기준 이상이어야 한다.',
       passEvidence: observed,
       sourcePointer,
       evidencePointer,

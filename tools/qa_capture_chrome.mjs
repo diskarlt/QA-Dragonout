@@ -602,6 +602,11 @@ function buildScreenArtifact(target, captureResult, domMeta, viewport) {
   }
 
   const gameState = snap?.gameState ?? null;
+  const sceneContract = snap?.sceneContract ?? null;
+  const visualSubjects = [
+    ...(Array.isArray(snap?.visualSubjects) ? snap.visualSubjects : []),
+    ...(Array.isArray(sceneContract?.visualSubjects) ? sceneContract.visualSubjects : []),
+  ];
 
   const hasText = visibleText.length > 0;
   const hasCtaOrGuardianOrLocation = primaryCtas.length > 0 || renderedGuardians.length > 0 || renderedLocations.length > 0;
@@ -639,10 +644,24 @@ function buildScreenArtifact(target, captureResult, domMeta, viewport) {
     primaryCtas,
     renderedGuardians,
     renderedLocations,
+    sceneContract,
+    visualSubjects: dedupeVisualSubjects(visualSubjects),
     gameState,
     missingEvidence,
     source: sourceList,
   };
+}
+
+function dedupeVisualSubjects(subjects) {
+  const seen = new Set();
+  const result = [];
+  for (const subject of subjects ?? []) {
+    const key = String(subject?.id ?? subject?.messageId ?? subject?.subjectId ?? '').trim();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    result.push(subject);
+  }
+  return result;
 }
 
 function filterExpectedGuardians(target, guardians) {

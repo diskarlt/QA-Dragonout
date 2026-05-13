@@ -10,6 +10,7 @@ import {
   passIssue,
   ruleInvalidIssue,
 } from './qa_queue_model.mjs';
+import { evaluateQuantitativeScreenContracts } from './qa_quantitative_contracts.mjs';
 
 const reportDir = process.env.QA_REPORT_DIR ?? 'docs/qa/reports/2026-05-09-ui-qa-pipeline';
 const matrixPath = process.env.QA_MATRIX_PATH ?? 'tools/qa_matrix.json';
@@ -357,6 +358,7 @@ function productScreenReview(screen) {
     ? normalizeIssues([
         ...fixedRuleIssues,
         ...matrixIssuesForScreen(screen, lint, artifactById.get(screen.id)),
+        ...evaluateQuantitativeScreenContracts(screen, artifactById.get(screen.id)),
       ])
     : [blockedIssue({
         id: `${screen.id}.qa_evidence_incomplete`,
@@ -1992,6 +1994,11 @@ function enrichArtifactFromDomMeta(screen, captureRow, domMeta, viewport) {
       ? snap.locations.map(l => ({ ...l, evidence: 'qa_snapshot' }))
       : (domMeta.ariaLocations ?? []);
   const gameState = snap?.gameState ?? null;
+  const sceneContract = snap?.sceneContract ?? null;
+  const visualSubjects = dedupeVisualSubjects([
+    ...(Array.isArray(snap?.visualSubjects) ? snap.visualSubjects : []),
+    ...(Array.isArray(sceneContract?.visualSubjects) ? sceneContract.visualSubjects : []),
+  ]);
 
   const hasText = visibleText.length > 0;
   const hasCtaOrGuardianOrLocation =
@@ -2035,6 +2042,8 @@ function enrichArtifactFromDomMeta(screen, captureRow, domMeta, viewport) {
     primaryCtas,
     renderedGuardians,
     renderedLocations,
+    sceneContract,
+    visualSubjects,
     gameState,
     missingEvidence,
     source: sourceList,
@@ -2053,10 +2062,24 @@ function buildStubArtifact(screen, captureRow, viewport) {
     primaryCtas: [],
     renderedGuardians: [],
     renderedLocations: [],
+    sceneContract: null,
+    visualSubjects: [],
     gameState: null,
     missingEvidence: ['no domMeta available — run qa_capture_chrome.mjs to populate artifacts'],
     source: ['stub'],
   };
+}
+
+function dedupeVisualSubjects(subjects) {
+  const seen = new Set();
+  const result = [];
+  for (const subject of subjects ?? []) {
+    const key = String(subject?.id ?? subject?.messageId ?? subject?.subjectId ?? '').trim();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    result.push(subject);
+  }
+  return result;
 }
 
 async function readOptionalJson(path, fallback) {

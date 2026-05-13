@@ -181,6 +181,7 @@ const finalPassEligible =
   regressionLockScreens.every((screen) => screen.status === 'PASS') &&
   flowRows.every((row) => row.finalVerdict === 'PASS');
 const finalStatus = finalPassEligible ? 'PASS' : qaMode === 'fast' ? '부분 검수 완료' : 'QA 미통과';
+const validationExpectedStatus = finalPassEligible ? 'pass' : 'not_pass';
 
 const payload = {
   generated_at: new Date().toISOString(),
@@ -1343,7 +1344,7 @@ function renderMarkdownReport() {
   const lockLines = regressionLockScreens.length
     ? regressionLockScreens.map((screen) => `- **${screen.id}**: ${screen.status} (${(screen.checks ?? []).length} checks, queue ${(screen.dev_queue_item_ids ?? []).length})`)
     : ['- regression_lock.json 미생성'];
-  return `# Dragonout QA Report\n\n생성 시각: ${new Date().toISOString()}\n\n## 최종 상태\n\n- 상태: ${finalStatus}\n- Dev Queue FAIL: ${devQueueItems.length}\n- QA Queue BLOCKED: ${qaQueueCounts.blocked}\n- RULE_INVALID: ${qaQueueCounts.rule_invalid}\n- SKIP: ${qaQueueCounts.skip}\n- LOW_CONFIDENCE: 0\n- Regression Lock FAIL: ${regressionLockScreens.filter((screen) => screen.status === 'FAIL').length}/${regressionLockScreens.length}\n\n## 수정 큐\n\n${queueLines.join('\n')}\n\n## QA Queue\n\n${queueGroupLines.join('\n')}\n\n## Regression Lock\n\n${lockLines.join('\n')}\n\n## 검증 명령\n\n- \`node tools/qa_build_dev_queue.mjs\`\n- \`QA_MODE=${qaMode} QA_EXPECT_FINAL_STATUS=not_pass node tools/qa_validate_report.mjs\`\n`;
+  return `# Dragonout QA Report\n\n생성 시각: ${new Date().toISOString()}\n\n## 최종 상태\n\n- 상태: ${finalStatus}\n- Dev Queue FAIL: ${devQueueItems.length}\n- QA Queue BLOCKED: ${qaQueueCounts.blocked}\n- RULE_INVALID: ${qaQueueCounts.rule_invalid}\n- SKIP: ${qaQueueCounts.skip}\n- LOW_CONFIDENCE: 0\n- Regression Lock FAIL: ${regressionLockScreens.filter((screen) => screen.status === 'FAIL').length}/${regressionLockScreens.length}\n\n## 수정 큐\n\n${queueLines.join('\n')}\n\n## QA Queue\n\n${queueGroupLines.join('\n')}\n\n## Regression Lock\n\n${lockLines.join('\n')}\n\n## 검증 명령\n\n- \`node tools/qa_build_dev_queue.mjs\`\n- \`QA_MODE=${qaMode} QA_EXPECT_FINAL_STATUS=${validationExpectedStatus} node tools/qa_validate_report.mjs\`\n`;
 }
 
 function ruleQueueItem(type, targetLabel, rule, finding) {

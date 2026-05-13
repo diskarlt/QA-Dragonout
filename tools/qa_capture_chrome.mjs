@@ -573,6 +573,7 @@ function buildScreenArtifact(target, captureResult, domMeta, viewport) {
       visible: g.visible ?? true,
       evidence: 'qa_snapshot',
     }));
+    renderedGuardians = filterExpectedGuardians(target, renderedGuardians);
     guardianSource = 'qa_snapshot';
   } else if (domMeta.ariaGuardians?.length > 0) {
     renderedGuardians = domMeta.ariaGuardians;
@@ -642,6 +643,16 @@ function buildScreenArtifact(target, captureResult, domMeta, viewport) {
     missingEvidence,
     source: sourceList,
   };
+}
+
+function filterExpectedGuardians(target, guardians) {
+  const expected = Array.isArray(target.expectedCharacters)
+    ? target.expectedCharacters.map(String).filter(Boolean)
+    : [];
+  if (expected.length === 0) return guardians;
+  const expectedSet = new Set(expected);
+  const filtered = guardians.filter((guardian) => expectedSet.has(String(guardian.guardianId ?? guardian.id ?? '')));
+  return filtered.length > 0 ? filtered : guardians;
 }
 
 function inferGuardiansFromSemanticText(target, visibleText, semanticNodes) {

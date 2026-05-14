@@ -442,9 +442,6 @@ const tests = [
       const findingRuleIds = (baseStatus.findings ?? []).map((finding) => finding.rule_id).sort();
       assertEqualList(findingRuleIds, [
         'cta_ssot_contract',
-        'guardian_portrait_no_crop',
-        'guardian_portrait_scale_consistency',
-        'guardian_presence_exact',
       ]);
       const issueRuleIds = (baseStatus.qa_issues ?? []).map((issue) => issue.rule_id).filter(Boolean).sort();
       const html = await readFile(join(dir, 'report.html'), 'utf8');
@@ -454,7 +451,7 @@ const tests = [
       for (const ruleId of [
         'cta_ssot_contract',
         'guardian_presence_exact',
-        'guardian_motion_pseudo_live2d_presence',
+        'guardian_motion.pseudo_live2d_presence',
         'guardian_portrait_no_crop',
         'guardian_portrait_scale_consistency',
       ]) {
@@ -462,16 +459,17 @@ const tests = [
           throw new Error(`expected product qa_issues to include ${ruleId}`);
         }
         if (!html.includes(ruleId)) throw new Error(`expected report.html to include ${ruleId}`);
-        if (ruleId === 'guardian_motion_pseudo_live2d_presence') {
-          const motionIssue = (baseStatus.qa_issues ?? []).find((item) => item.rule_id === ruleId);
-          if (motionIssue?.status !== 'PASS') {
-            throw new Error(`expected motion artifact evidence to classify ${ruleId} as PASS`);
-          }
-          if (devQueue.qa_queue.some((item) => item.rule_id === ruleId && item.status === 'BLOCKED')) {
-            throw new Error(`expected qa_queue not to include blocked motion rule ${ruleId} when artifact exists`);
-          }
-        } else if (!devQueue.items.some((item) => item.rule_id === ruleId)) {
-          throw new Error(`expected dev_queue.json to include ${ruleId}`);
+        const issue = (baseStatus.qa_issues ?? []).find((item) => item.rule_id === ruleId);
+        const expectedStatus = ruleId === 'cta_ssot_contract' ? 'FAIL' : 'PASS';
+        if (issue?.status !== expectedStatus) {
+          throw new Error('expected ' + ruleId + ' to be ' + expectedStatus + ', got ' + (issue?.status ?? 'missing'));
+        }
+        if (ruleId === 'guardian_motion.pseudo_live2d_presence' &&
+            devQueue.qa_queue.some((item) => item.rule_id === ruleId && item.status === 'BLOCKED')) {
+          throw new Error('expected qa_queue not to include blocked motion rule ' + ruleId + ' when artifact exists');
+        }
+        if (ruleId === 'cta_ssot_contract' && !devQueue.items.some((item) => item.rule_id === ruleId)) {
+          throw new Error('expected dev_queue.json to include ' + ruleId);
         }
         if (!baseLock.checks.some((check) => check.id === ruleId)) {
           throw new Error(`expected regression_lock.json to include ${ruleId}`);
@@ -1041,7 +1039,7 @@ const tests = [
     },
   ],
   [
-    'missing motion artifact blocks guardian_motion_pseudo_live2d_presence',
+    'missing motion artifact blocks guardian_motion.pseudo_live2d_presence',
     async (dir) => {
       const { rm: rmFs } = await import('node:fs/promises');
       await rmFs(join(dir, 'motion_artifacts.json'), { force: true });
@@ -1540,10 +1538,10 @@ function calS02Rules() {
       source: 'test_fixture',
     },
     {
-      rule_id: 'guardian_motion_pseudo_live2d_presence',
-      assertion: '가디언 표현은 정지 screenshot만으로 motion/Live2D-like 상태를 확정하지 않는다.',
+      rule_id: 'guardian_motion.pseudo_live2d_presence',
+      assertion: '가디언 portrait는 M3 출시 후보 범위의 Flutter-only pseudo-Live2D 변화가 video/frame artifact에서 확인되어야 한다.',
       current_observation: '테스트 fixture에서 CAL-S02 motion 룰은 비디오 또는 timestamp frame artifact가 없으면 BLOCKED로 남아야 한다.',
-      pass_criteria: '눈/호흡/표정/오버레이 등 레이어 단위 움직임 또는 상태 변화가 2초 비디오나 3개 timestamp frame으로 확인되어야 한다.',
+      pass_criteria: 'video_2s_or_3_timestamp_frames artifact에서 idle float, breathing scale, glow/aura, default/fatigued/low_bond 상태 톤 중 하나 이상의 안정적 변화가 확인되어야 한다.',
       severity: 'P0',
       source: 'test_fixture',
     },
@@ -1806,13 +1804,26 @@ async function writeScreenArtifacts(dir, matrix) {
         displayName: id,
         portraitAssetId: `${id}.png`,
         state: 'default',
-        bounds: null,
+        bounds: { x: 0, y: 0, width: 84, height: 108 },
+        portraitBounds: { x: 0, y: 0, width: 84, height: 108 },
+        safeArea: { x: 0, y: 4, width: 84, height: 100 },
+        cropSize: 'faceClose',
+        coordinateSpace: 'portrait_card_local_84x108',
+        faceScale: 0.13,
+        focusScale: 2.2,
+        sourceEyeMidpointPx: { x: 512, y: 384 },
+        projectedEyeMidpointPx: { x: 42, y: 32 },
+        eyeMidpointDeltaPx: { x: 0, y: 0 },
+        projectedHeadTopPx: 18,
+        headCrop: false,
+        cropped: false,
+        qaMetricThresholds: { maxEyeDeltaXPx: 24, maxEyeDeltaYPx: 32 },
         visible: true,
         evidence: 'test_fixture',
       })),
       renderedLocations: [],
       gameState: { fixture: true, screen: screen.id },
-      metadataQuality: 'test_fixture',
+      metadataQuality: 'captured',
       capturedAt: new Date().toISOString(),
     };
     return artifact;

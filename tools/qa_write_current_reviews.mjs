@@ -488,6 +488,8 @@ function fixedScreenRulePassEvidence(rule, screen) {
       guardian.cropped !== true &&
       !boundsOutsideViewport(guardian.bounds, artifact.viewport),
   );
+  const hasPortraitMetricPass = rendered.length > 0 &&
+    rendered.every((guardian) => hasPortraitMetricEvidence(guardian) && portraitMetricsPass(guardian));
 
   switch (rule.rule_id) {
     case 'main_logo_not_plain_text':
@@ -506,8 +508,8 @@ function fixedScreenRulePassEvidence(rule, screen) {
         : null;
     case 'guardian_portrait_scale_consistency':
     case 'guardian_portrait_no_crop':
-      return rendered.length > 0 && hasGuardianSetPass && hasNoCropEvidence
-        ? `${screen.screenshot} renderedGuardians ${rendered.length}건에서 headCrop/cropped=true가 없고 polish_lints가 portrait scale/crop 관련 finding 없이 통과했다.`
+      return rendered.length > 0 && hasGuardianSetPass && hasNoCropEvidence && hasPortraitMetricPass
+        ? `${screen.screenshot} renderedGuardians ${rendered.length}건에서 ${rendered.map(portraitMetricSummary).join(' / ')} metric이 허용 범위 안이고 polish_lints가 portrait scale/crop finding 없이 통과했다.`
         : null;
     case 'cta_ssot_contract':
       return ctas.some((label) => label.includes('첫 외출하기') || label.includes('외출하기') || label.includes('보고 확인')) &&
@@ -564,7 +566,7 @@ function fixedRulePassIssue(rule, {
   evidencePointer,
 }) {
   return passIssue({
-    id: `${targetId}.${rule.rule_id}`,
+    id: `${targetId}.${rule.rule_id}.fixed_rule`,
     source,
     targetType,
     targetId,
@@ -612,7 +614,7 @@ function motionRuleIssue(rule, screen, sourcePointer) {
   const frameEvidence = motionFrameEvidence(artifact);
   if (motionArtifactHasChange(artifact)) {
     return passIssue({
-      id: `${screen.id}.${rule.rule_id}`,
+      id: `${screen.id}.${rule.rule_id}.fixed_rule`,
       source: 'product_review',
       targetType: 'screen',
       targetId: screen.id,
@@ -633,7 +635,7 @@ function motionRuleIssue(rule, screen, sourcePointer) {
   }
 
   return {
-    id: `${screen.id}.${rule.rule_id}`,
+    id: `${screen.id}.${rule.rule_id}.fixed_rule`,
     source: 'product_review',
     target_type: 'screen',
     target_id: screen.id,
@@ -1209,16 +1211,19 @@ function hasUsableGuardianArtifact(artifact) {
   return Boolean(
     artifact &&
       rendered.length > 0 &&
-      (
-        artifact.metadataQuality === 'captured' ||
-        rendered.some((guardian) => guardian.evidence === 'semantic_text' || guardian.semanticId || guardian.bounds)
-      ),
+      artifact.metadataQuality === 'captured',
   );
 }
 
 function requiresMotionEvidence(rule) {
   return (rule.requires_evidence ?? []).includes('video_2s_or_3_timestamp_frames') ||
-    ['guardian_live2d_layered_motion', 'guardian_motion_pseudo_live2d_presence'].includes(rule.rule_id);
+    [
+      'guardian_live2d_layered_motion',
+      'guardian_motion.pseudo_live2d_presence',
+      'guardian_motion_pseudo_live2d_presence',
+      'static_portrait_no_live2d',
+      'static_portrait_no_motion_evidence',
+    ].includes(rule.rule_id);
 }
 
 function motionMatrixDecision(screen, item) {
@@ -1297,12 +1302,18 @@ function guardianMatrixDecision(screen, item, artifact, lint) {
     };
   }
   if (rendered.length === 0) {
-    return artifactBackedPassEvidence(screen, item, 'expected', lint, artifact)
-      ? {
-        status: 'PASS',
-        observed: `${screen.screenshot} 390x844 캡처와 기대 가디언(${expected.join(', ')})가 ${screen.state} 화면의 "${item.label}" 기준 검수 근거로 기록됐다. 표시 가디언 semantic metadata는 다음 캡처에서 보강 대상이지만 근거 부족 BLOCKED로 남기지는 않는다.`,
-      }
-      : null;
+    return {
+      status: 'BLOCKED',
+      observed: `${screen.screenshot} 390x844 캡처에서 기대 가디언(${expected.join(', ')}) 기준은 있으나 renderedGuardians가 비어 있어 "${item.label}" 기준을 정량 판정할 수 없다.`,
+      blockedReason: 'M3 출시 품질 기준은 portrait 화면마다 id/name/asset 및 crop/scale metric을 가진 renderedGuardians metadata가 필요하다.',
+      missingEvidence: [
+        'renderedGuardians[].guardianId',
+        'renderedGuardians[].portraitAssetId',
+        'renderedGuardians[].portraitBounds',
+        'renderedGuardians[].eyeMidpointDeltaPx',
+      ],
+      requiredArtifact: ['screen_artifacts.json', `screen_artifacts/${screen.id}.json`],
+    };
   }
 
   const renderedIds = new Set(rendered.map((guardian) => String(guardian.guardianId ?? guardian.id ?? '').trim()).filter(Boolean));
@@ -1340,6 +1351,28 @@ function guardianMatrixDecision(screen, item, artifact, lint) {
   }
 
   if (item.id.includes('portrait_no_crop') || item.id.includes('portrait_crop') || item.id.includes('portrait_cropped')) {
+    const metricMissing = rendered.filter((guardian) => !hasPortraitMetricEvidence(guardian));
+    if (metricMissing.length > 0) {
+      return {
+        status: 'BLOCKED',
+        observed: `${screen.screenshot} renderedGuardians 중 ${metricMissing.map(g => g.guardianId).join(', ')} 항목에 portraitBounds/safeArea/eyeMidpointDeltaPx metric이 부족해 "${item.label}" 기준을 정량 판정할 수 없다.`,
+        blockedReason: 'M3 guardian portrait 기준은 head crop 여부와 눈 중심 delta를 숫자로 남겨야 한다.',
+        missingEvidence: [
+          'renderedGuardians[].portraitBounds',
+          'renderedGuardians[].safeArea',
+          'renderedGuardians[].eyeMidpointDeltaPx',
+          'renderedGuardians[].qaMetricThresholds',
+        ],
+        requiredArtifact: ['screen_artifacts.json', `screen_artifacts/${screen.id}.json`],
+      };
+    }
+    const metricFailures = rendered.filter((guardian) => !portraitMetricsPass(guardian));
+    if (metricFailures.length > 0) {
+      return {
+        status: 'FAIL',
+        observed: `${screen.screenshot} renderedGuardians metric에서 ${metricFailures.map(portraitMetricSummary).join(', ')} 항목이 safe area 또는 eye delta 허용치를 벗어난 것으로 기록됐다.`,
+      };
+    }
     const cropped = rendered.filter((guardian) =>
       guardian.headCrop === true ||
       guardian.cropped === true ||
@@ -1355,20 +1388,26 @@ function guardianMatrixDecision(screen, item, artifact, lint) {
     if (bounded.length > 0 || rendered.every((guardian) => guardian.visible !== false)) {
       return {
         status: 'PASS',
-        observed: `${screen.screenshot} renderedGuardians evidence에서 visible portrait ${rendered.length}건이 기록됐고 headCrop=true metadata가 없다. bounds 근거: ${bounded.map(g => `${g.guardianId}@${boundsText(g.bounds)}`).join(', ') || 'semantic visible state'}.`,
+        observed: `${screen.screenshot} renderedGuardians ${rendered.length}건이 M3 portrait metric을 기록했고 모두 headCrop=false, eyeMidpointDelta 허용 범위 안이다. metric 근거: ${rendered.map(portraitMetricSummary).join(' / ')}.`,
       };
     }
   }
 
   if (item.id.includes('portrait_scale')) {
     const scales = rendered.map((guardian) => Number(guardian.faceScale)).filter(Number.isFinite);
+    if (scales.length === 1 && rendered.length === 1 && hasPortraitMetricEvidence(rendered[0])) {
+      return {
+        status: 'PASS',
+        observed: `${screen.screenshot} renderedGuardians 1건의 faceScale=${roundNumber(scales[0])}, ${portraitMetricSummary(rendered[0])} metric이 기록되어 단일 portrait 화면의 scale 기준을 막는 불일치가 없다.`,
+      };
+    }
     if (scales.length >= 2) {
       const min = Math.min(...scales);
       const max = Math.max(...scales);
       const delta = max - min;
       return {
         status: delta > 0.18 ? 'FAIL' : 'PASS',
-        observed: `${screen.screenshot} renderedGuardians faceScale metadata min=${roundNumber(min)}, max=${roundNumber(max)}, delta=${roundNumber(delta)}로 기록됐다.`,
+        observed: `${screen.screenshot} renderedGuardians faceScale metadata min=${roundNumber(min)}, max=${roundNumber(max)}, delta=${roundNumber(delta)}로 기록됐고 sourceEyeMidpoint/eyeDelta 근거가 함께 남았다.`,
       };
     }
     const heights = rendered.map((guardian) => Number(guardian.bounds?.height)).filter(Number.isFinite);
@@ -1382,15 +1421,19 @@ function guardianMatrixDecision(screen, item, artifact, lint) {
       };
     }
     return {
-      status: 'PASS',
-      observed: `${screen.screenshot} renderedGuardians semantic evidence ${rendered.length}건이 있으며 portrait scale 전용 수치 metadata는 다음 캡처에서 보강 대상이지만 현재 lint finding 없이 기준 근거로 기록됐다.`,
+      status: 'BLOCKED',
+      observed: `${screen.screenshot} renderedGuardians ${rendered.length}건은 있으나 faceScale 또는 bounds height 수치가 없어 portrait scale 기준을 정량 판정할 수 없다.`,
+      blockedReason: 'M3 출시 품질 기준은 화면별 guardian portrait scale을 반복 비교할 수 있는 numeric metadata를 요구한다.',
+      missingEvidence: ['renderedGuardians[].faceScale', 'renderedGuardians[].bounds.height'],
+      requiredArtifact: ['screen_artifacts.json', `screen_artifacts/${screen.id}.json`],
     };
   }
 
   if (item.id.includes('portrait_surface')) {
+    const metricCount = rendered.filter(hasPortraitMetricEvidence).length;
     return {
       status: 'PASS',
-      observed: `${screen.screenshot} polish_lints 상태 ${lint?.status ?? '미확인'}이며 renderedGuardians semantic evidence ${rendered.length}건이 있어 초상 표면 구분 기준을 검수 근거로 기록했다.`,
+      observed: `${screen.screenshot} polish_lints 상태 ${lint?.status ?? '미확인'}이며 renderedGuardians ${rendered.length}건 중 numeric portrait metric ${metricCount}건이 기록되어 초상 표면 구분 기준을 검수 근거로 기록했다.`,
     };
   }
 
@@ -1442,6 +1485,35 @@ function artifactTextSample(artifact) {
 function artifactCtaSample(artifact) {
   const sample = (artifact?.primaryCtas ?? []).slice(0, 3).map((cta) => cta.label).filter(Boolean).join(' | ');
   return sample ? ` CTA="${sample}"` : '';
+}
+
+function hasPortraitMetricEvidence(guardian) {
+  return Boolean(
+    guardian?.portraitBounds &&
+      guardian?.safeArea &&
+      guardian?.eyeMidpointDeltaPx &&
+      guardian?.qaMetricThresholds,
+  );
+}
+
+function portraitMetricsPass(guardian) {
+  if (guardian?.headCrop === true || guardian?.cropped === true) return false;
+  const deltaX = Math.abs(Number(guardian?.eyeMidpointDeltaPx?.x));
+  const deltaY = Math.abs(Number(guardian?.eyeMidpointDeltaPx?.y));
+  const maxX = Number(guardian?.qaMetricThresholds?.maxEyeDeltaXPx ?? 24);
+  const maxY = Number(guardian?.qaMetricThresholds?.maxEyeDeltaYPx ?? 32);
+  const headTop = Number(guardian?.projectedHeadTopPx);
+  const safeTop = Number(guardian?.safeArea?.y ?? 0);
+  const eyeOk = [deltaX, deltaY, maxX, maxY].every(Number.isFinite) && deltaX <= maxX && deltaY <= maxY;
+  const headOk = !Number.isFinite(headTop) || !Number.isFinite(safeTop) || headTop >= safeTop;
+  return eyeOk && headOk;
+}
+
+function portraitMetricSummary(guardian) {
+  const id = guardian?.guardianId ?? guardian?.id ?? 'unknown';
+  const delta = guardian?.eyeMidpointDeltaPx ?? {};
+  const thresholds = guardian?.qaMetricThresholds ?? {};
+  return `${id}(crop=${guardian?.cropSize ?? 'unknown'}, faceScale=${roundNumber(guardian?.faceScale ?? 0)}, eyeDelta=${roundNumber(delta.x ?? 0)}/${roundNumber(delta.y ?? 0)}, max=${roundNumber(thresholds.maxEyeDeltaXPx ?? 24)}/${roundNumber(thresholds.maxEyeDeltaYPx ?? 32)}, headTop=${roundNumber(guardian?.projectedHeadTopPx ?? 0)})`;
 }
 
 function boundsText(bounds) {

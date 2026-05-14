@@ -9,6 +9,7 @@ const clientPath = 'tools/qa_dashboard_client.mjs';
 const canonicalRunnerRoot = process.cwd();
 
 await testCanonicalDelegation();
+await testStaleActiveJobDoctor();
 await testMissingRunner();
 await testStaleServer();
 
@@ -47,6 +48,47 @@ async function testCanonicalDelegation() {
     assert(result.runnerRoot === canonicalRunnerRoot, 'client records canonical runner root');
     assert(received.targetWorktree === '/Users/euna/Developer/Dragonout-task-demo', 'client sends target worktree');
     assert(received.changedFiles === 'lib/main.dart', 'client sends changed files');
+  } finally {
+    await closeServer(server);
+  }
+}
+
+async function testStaleActiveJobDoctor() {
+  const port = 64883;
+  const server = await startServer(port, async (request, response) => {
+    if (request.method === 'GET' && request.url === '/api/health') {
+      return json(response, 200, {
+        runnerRoot: canonicalRunnerRoot,
+        isCanonicalRunner: true,
+        dashboardVersion: 'calibration-readability-v1',
+        reportDir: `${canonicalRunnerRoot}/reports/current`,
+        pid: process.pid,
+      });
+    }
+    if (request.method === 'GET' && request.url === '/api/status') {
+      return json(response, 200, {
+        defaults: { targetWorktree: '/Users/euna/Developer/Dragonout' },
+        activeJob: {
+          id: 'qa-stale',
+          mode: 'full',
+          status: 'running',
+          phase: 'capture',
+          stale: true,
+          staleMs: 120000,
+          lastHeartbeatAt: '2026-05-14T00:00:00.000Z',
+          childProgress: { phase: 'capture', message: 'Chrome screenshot capture' },
+        },
+        lastJob: null,
+      });
+    }
+    json(response, 404, { error: 'not found' });
+  });
+  try {
+    const result = await runClient(port, ['doctor'], false);
+    assert(result.code !== 0, 'stale active job doctor returns non-zero');
+    const body = JSON.parse(result.stdout);
+    assert(body.status === 'stale_active_job', 'doctor flags stale active job');
+    assert(body.activeJob?.id === 'qa-stale', 'doctor includes stale job snapshot');
   } finally {
     await closeServer(server);
   }

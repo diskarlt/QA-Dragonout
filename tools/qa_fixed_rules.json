@@ -42,8 +42,8 @@
       "target_id": "base_status",
       "assertion": "거점 가디언 초상화는 카드 사이에서 얼굴/상반신 비율이 일관되지 않으면 FAIL이다.",
       "observed_evidence": "final_04_base_status.png에서 가디언 초상화의 얼굴 크기와 상반신 노출 비율이 서로 다르게 보인다.",
-      "pass_criteria": "모든 가디언 카드에서 얼굴 크기, 상반신 노출, 기준선이 같은 portrait spec 안에 들어와야 한다.",
-      "recommended_fix": "가디언 초상 비율과 카드 기준선을 같은 portrait spec으로 맞춘다.",
+      "pass_criteria": "모든 가디언 카드에서 원본 이미지 기준 양 눈 중심 midpoint가 카드 십자선 기준 X축 ±24px, Y축 ±32px 안에 들어오고, 얼굴 크기와 상반신 노출이 같은 portrait spec 안에 들어와야 한다.",
+      "recommended_fix": "원본 portrait crop에서 양 눈 중심 midpoint px 좌표를 잰 뒤 가디언 초상 비율과 카드 기준선을 같은 portrait spec으로 맞춘다.",
       "severity": "P0"
     },
     {
@@ -53,18 +53,18 @@
       "target_id": "base_status",
       "assertion": "가디언 portrait는 머리와 핵심 실루엣이 카드 안전영역에서 잘리면 FAIL이다.",
       "observed_evidence": "final_04_base_status.png에서 카엘 머리 부분이 portrait 카드 안전영역 밖으로 잘려나간다.",
-      "pass_criteria": "카엘을 포함한 모든 가디언 portrait의 머리와 핵심 실루엣이 카드 내부 안전영역에 온전히 들어와야 한다.",
-      "recommended_fix": "카엘 portrait crop과 안전영역을 재조정한다.",
+      "pass_criteria": "카엘을 포함한 모든 가디언 portrait의 양 눈 중심 midpoint가 카드 십자선 기준 X축 ±24px, Y축 ±32px 안에 있고, 머리와 핵심 실루엣이 카드 내부 안전영역에 온전히 들어와야 한다.",
+      "recommended_fix": "가디언별 원본 eye midpoint px 좌표와 portrait crop 안전영역을 재조정한다.",
       "severity": "P0"
     },
     {
-      "rule_id": "guardian_motion_pseudo_live2d_presence",
+      "rule_id": "guardian_motion.pseudo_live2d_presence",
       "source_candidate_id": "CAL-S02",
       "type": "screen_problem",
       "target_id": "base_status",
-      "assertion": "가디언 portrait는 pseudo-Live2D 레이어 변화가 video/frame artifact에서 확인되어야 한다.",
+      "assertion": "가디언 portrait는 M3 출시 후보 범위의 Flutter-only pseudo-Live2D 변화가 video/frame artifact에서 확인되어야 한다.",
       "observed_evidence": "final_04_base_status.png는 정지 screenshot이므로 가디언 motion 상태를 판정할 수 없다.",
-      "pass_criteria": "video_2s_or_3_timestamp_frames artifact에서 눈/호흡/표정/오버레이 중 하나 이상의 레이어 변화가 확인되어야 한다.",
+      "pass_criteria": "video_2s_or_3_timestamp_frames artifact에서 idle float, breathing scale, glow/aura, default/fatigued/low_bond 상태 톤 중 하나 이상의 안정적 변화가 확인되어야 한다.",
       "recommended_fix": "2초 비디오 또는 3 timestamp frame artifact를 캡처한 뒤 pseudo-Live2D 상태를 판정한다.",
       "severity": "P0",
       "requires_evidence": [
@@ -154,10 +154,10 @@
       "source_candidate_id": "CAL-F03",
       "type": "screen_problem",
       "target_id": "ending_cycle1",
-      "assertion": "엔딩 결산은 남은 자원 수치 배지를 노출하지 않고 해금/잠김 정보를 HUD 톤 안에서 보여야 한다.",
-      "observed_evidence": "엔딩 결산 화면에서 남은 자원 수치 배지가 payoff보다 목록형 정보처럼 읽힐 수 있다.",
-      "pass_criteria": "남은 자원 섹션이 없고 해금/잠김 정보가 HUD 톤과 통합되며 흰 배경 배지 패턴이 없어야 한다.",
-      "recommended_fix": "엔딩 자원 수치 요약을 제거하고 해금/잠김 정보만 HUD 톤 안에서 유지한다.",
+      "assertion": "엔딩 결산의 자원/해금/결산 정보가 흰 비트맵 배지처럼 떠 보이면 FAIL이다.",
+      "observed_evidence": "엔딩 결산 화면에서 자원/해금 정보가 HUD 톤과 분리된 흰 배경 배지 패턴으로 보일 수 있다.",
+      "pass_criteria": "자원/해금 정보가 HUD 톤과 통합되고 흰 배경 배지 패턴이 없어야 한다.",
+      "recommended_fix": "엔딩 자원·해금 정보 배지 배경을 HUD 톤에 맞게 수정한다.",
       "severity": "P1"
     },
     {

@@ -486,20 +486,6 @@
           "blockedIf": [
             "portraitSurfaceToken 또는 contrast metadata가 없다."
           ]
-        },
-        {
-          "id": "guardian_motion.pseudo_live2d_presence",
-          "label": "가디언 portrait가 2초 영상 또는 3 timestamp frame에서 pseudo-Live2D 레이어 변화를 가진다.",
-          "required": true,
-          "passIf": [
-            "video_2s_or_3_timestamp_frames artifact에서 눈/호흡/표정/오버레이 중 하나 이상의 portrait layer 변화가 확인된다."
-          ],
-          "failIf": [
-            "video_2s_or_3_timestamp_frames artifact에서 모든 frame의 portrait layer가 동일하다."
-          ],
-          "blockedIf": [
-            "video_2s_or_3_timestamp_frames artifact가 없다."
-          ]
         }
       ],
       "implementedEvidence": [
@@ -632,17 +618,17 @@
           ]
         },
         {
-          "id": "static_portrait_no_motion_evidence",
-          "label": "motion evidence에서 정지 portrait만 반복되는 패턴이 보이지 않는다.",
+          "id": "guardian_blink_overlay_outside_face",
+          "label": "blink/overlay가 전체 이미지 또는 눈/입 외 영역을 덮지 않는다.",
           "required": true,
           "passIf": [
-            "screen_artifact 또는 polish_lints가 static_portrait_no_motion_evidence 기준의 기대 상태를 구체 metadata로 충족한다."
+            "video_2s_or_3_timestamp_frames artifact 또는 screen_artifact metadata에서 blink/overlay가 비활성화되어 있거나 눈/입 전용 bounds 안에만 표시된다."
           ],
           "failIf": [
-            "screen_artifact 또는 polish_lints가 static_portrait_no_motion_evidence 기준의 금지/위반 상태를 구체 finding으로 기록한다."
+            "blink/overlay가 전체 portrait를 깜빡이게 하거나 눈/입 외 영역을 덮거나 frame 사이에서 크롭/스케일 점프를 만든다."
           ],
           "blockedIf": [
-            "static_portrait_no_motion_evidence 기준을 판정할 screen_artifact, polish_lints, transcript 중 필요한 artifact가 없다."
+            "blink/overlay 활성 여부와 overlay bounds metadata 또는 motion artifact가 없다."
           ]
         }
       ],
@@ -655,7 +641,6 @@
         "guardian_portrait_no_crop",
         "guardian_portrait_scale_consistency",
         "guardian_portrait_surface_distinct",
-        "guardian_live2d_layered_motion",
         "prologue_copy_review",
         "guardian_presence_review",
         "guardian_portrait_crop_review",
@@ -665,7 +650,7 @@
         "missing_expected_character",
         "guardian_portrait_cropped",
         "guardian_portrait_scale_mismatch",
-        "static_portrait_no_live2d"
+        "guardian_blink_overlay_outside_face"
       ],
       "failIfMissing": [
         "prologue_situation_clear",
@@ -676,7 +661,6 @@
         "guardian_portrait_no_crop",
         "guardian_portrait_scale_consistency",
         "guardian_portrait_surface_distinct",
-        "guardian_motion.pseudo_live2d_presence",
         "prologue_copy_review",
         "guardian_presence_review",
         "guardian_portrait_crop_review"
@@ -688,7 +672,7 @@
         "missing_expected_character",
         "guardian_portrait_cropped",
         "guardian_portrait_scale_mismatch",
-        "static_portrait_no_motion_evidence"
+        "guardian_blink_overlay_outside_face"
       ],
       "facets": [
         "prologue",
@@ -814,13 +798,13 @@
           "label": "캐릭터 머리와 핵심 실루엣이 안전영역 안에 들어온다.",
           "required": true,
           "passIf": [
-            "renderedGuardians 모든 항목의 headCrop=false이고 portraitBounds가 safeArea 안에 있다."
+            "renderedGuardians 모든 항목의 headCrop=false이고 projectedHeadTop이 safeArea 위쪽 경계 이상이며, eyeMidpointDelta가 X축 ±24px, Y축 ±32px 안에 있다."
           ],
           "failIf": [
-            "headCrop=true이거나 핵심 실루엣 bounds가 카드 safeArea 밖으로 나간 guardian이 있다."
+            "headCrop=true이거나 projectedHeadTop이 safeArea 위쪽 경계보다 작거나 eyeMidpointDelta가 X축 ±24px 또는 Y축 ±32px를 넘는 guardian이 있다."
           ],
           "blockedIf": [
-            "portraitBounds/headCrop metadata가 없다."
+            "portraitBounds/headCrop/eyeMidpointDelta metadata가 없다."
           ]
         },
         {
@@ -828,13 +812,13 @@
           "label": "같은 화면의 캐릭터 초상 비율과 기준선이 일관된다.",
           "required": true,
           "passIf": [
-            "renderedGuardians의 faceScale 값 편차가 허용 범위 안에 있다."
+            "renderedGuardians의 sourceEyeMidpointPx와 faceScale 값이 portrait spec 허용 범위 안에 있다."
           ],
           "failIf": [
-            "faceScale 최대/최소 편차가 portrait spec 허용 범위를 넘는다."
+            "sourceEyeMidpointPx가 원본 crop 측정값과 다르거나 faceScale 최대/최소 편차가 portrait spec 허용 범위를 넘는다."
           ],
           "blockedIf": [
-            "renderedGuardians.faceScale metadata가 없다."
+            "renderedGuardians.sourceEyeMidpointPx 또는 faceScale metadata가 없다."
           ]
         },
         {
@@ -853,13 +837,13 @@
         },
         {
           "id": "guardian_motion.pseudo_live2d_presence",
-          "label": "가디언 portrait가 2초 영상 또는 3 timestamp frame에서 pseudo-Live2D 레이어 변화를 가진다.",
+          "label": "가디언 portrait가 2초 영상 또는 3 timestamp frame에서 Flutter-only pseudo-Live2D 변화를 가진다.",
           "required": true,
           "passIf": [
-            "video_2s_or_3_timestamp_frames artifact에서 눈/호흡/표정/오버레이 중 하나 이상의 portrait layer 변화가 확인된다."
+            "video_2s_or_3_timestamp_frames artifact에서 idle float/호흡/오라/상태 톤 중 하나 이상의 안정적 portrait 변화가 확인된다."
           ],
           "failIf": [
-            "video_2s_or_3_timestamp_frames artifact에서 모든 frame의 portrait layer가 동일하다."
+            "video_2s_or_3_timestamp_frames artifact에서 모든 frame의 portrait 위치/스케일/오라/상태 톤이 동일하다."
           ],
           "blockedIf": [
             "video_2s_or_3_timestamp_frames artifact가 없다."
@@ -914,13 +898,13 @@
           "label": "초상 크롭, 스케일, 투명도, 배경 구분을 확인한다.",
           "required": true,
           "passIf": [
-            "renderedGuardians의 portraitBounds가 각 카드 safeArea 안에 있고 headCrop=false다."
+            "renderedGuardians의 portraitBounds/safeArea가 기록되고 headCrop=false이며, 원본 crop 기준 양 눈 중심 midpoint와 카드 십자선의 delta_x/delta_y가 X축 ±24px, Y축 ±32px 안에 있다."
           ],
           "failIf": [
-            "portraitBounds가 safeArea 밖으로 나가거나 headCrop=true인 guardian이 있다."
+            "projectedHeadTop이 safeArea 위쪽 경계보다 작거나 headCrop=true이거나, delta_x/delta_y가 X축 ±24px 또는 Y축 ±32px를 넘는 guardian이 있다."
           ],
           "blockedIf": [
-            "renderedGuardians.portraitBounds 또는 safeArea metadata가 없다."
+            "renderedGuardians.portraitBounds, safeArea, sourceEyeMidpointPx, eyeMidpointDelta metadata 중 하나라도 없다."
           ]
         }
       ],
@@ -1050,6 +1034,20 @@
           "blockedIf": [
             "static_portrait_no_motion_evidence 기준을 판정할 screen_artifact, polish_lints, transcript 중 필요한 artifact가 없다."
           ]
+        },
+        {
+          "id": "guardian_blink_overlay_outside_face",
+          "label": "blink/overlay가 전체 이미지 또는 눈/입 외 영역을 덮지 않는다.",
+          "required": true,
+          "passIf": [
+            "video_2s_or_3_timestamp_frames artifact 또는 screen_artifact metadata에서 blink/overlay가 비활성화되어 있거나 눈/입 전용 bounds 안에만 표시된다."
+          ],
+          "failIf": [
+            "blink/overlay가 전체 portrait를 깜빡이게 하거나 눈/입 외 영역을 덮거나 frame 사이에서 크롭/스케일 점프를 만든다."
+          ],
+          "blockedIf": [
+            "blink/overlay 활성 여부와 overlay bounds metadata 또는 motion artifact가 없다."
+          ]
         }
       ],
       "contractChecks": [
@@ -1061,7 +1059,7 @@
         "guardian_portrait_no_crop",
         "guardian_portrait_scale_consistency",
         "guardian_portrait_surface_distinct",
-        "guardian_live2d_layered_motion",
+        "guardian_motion.pseudo_live2d_presence",
         "fresh_capture",
         "hud_density_review",
         "guardian_presence_review",
@@ -1074,7 +1072,8 @@
         "missing_expected_character",
         "guardian_portrait_cropped",
         "guardian_portrait_scale_mismatch",
-        "static_portrait_no_live2d"
+        "static_portrait_no_motion_evidence",
+        "guardian_blink_overlay_outside_face"
       ],
       "failIfMissing": [
         "readable_priority",
@@ -1100,7 +1099,8 @@
         "missing_expected_character",
         "guardian_portrait_cropped",
         "guardian_portrait_scale_mismatch",
-        "static_portrait_no_motion_evidence"
+        "static_portrait_no_motion_evidence",
+        "guardian_blink_overlay_outside_face"
       ],
       "facets": [
         "base_hud",
@@ -1967,20 +1967,6 @@
           "blockedIf": [
             "portraitSurfaceToken 또는 contrast metadata가 없다."
           ]
-        },
-        {
-          "id": "guardian_motion.pseudo_live2d_presence",
-          "label": "가디언 portrait가 2초 영상 또는 3 timestamp frame에서 pseudo-Live2D 레이어 변화를 가진다.",
-          "required": true,
-          "passIf": [
-            "video_2s_or_3_timestamp_frames artifact에서 눈/호흡/표정/오버레이 중 하나 이상의 portrait layer 변화가 확인된다."
-          ],
-          "failIf": [
-            "video_2s_or_3_timestamp_frames artifact에서 모든 frame의 portrait layer가 동일하다."
-          ],
-          "blockedIf": [
-            "video_2s_or_3_timestamp_frames artifact가 없다."
-          ]
         }
       ],
       "implementedEvidence": [
@@ -2141,17 +2127,17 @@
           ]
         },
         {
-          "id": "static_portrait_no_motion_evidence",
-          "label": "motion evidence에서 정지 portrait만 반복되는 패턴이 보이지 않는다.",
+          "id": "guardian_blink_overlay_outside_face",
+          "label": "blink/overlay가 전체 이미지 또는 눈/입 외 영역을 덮지 않는다.",
           "required": true,
           "passIf": [
-            "screen_artifact 또는 polish_lints가 static_portrait_no_motion_evidence 기준의 기대 상태를 구체 metadata로 충족한다."
+            "video_2s_or_3_timestamp_frames artifact 또는 screen_artifact metadata에서 blink/overlay가 비활성화되어 있거나 눈/입 전용 bounds 안에만 표시된다."
           ],
           "failIf": [
-            "screen_artifact 또는 polish_lints가 static_portrait_no_motion_evidence 기준의 금지/위반 상태를 구체 finding으로 기록한다."
+            "blink/overlay가 전체 portrait를 깜빡이게 하거나 눈/입 외 영역을 덮거나 frame 사이에서 크롭/스케일 점프를 만든다."
           ],
           "blockedIf": [
-            "static_portrait_no_motion_evidence 기준을 판정할 screen_artifact, polish_lints, transcript 중 필요한 artifact가 없다."
+            "blink/overlay 활성 여부와 overlay bounds metadata 또는 motion artifact가 없다."
           ]
         }
       ],
@@ -2164,7 +2150,6 @@
         "guardian_portrait_no_crop",
         "guardian_portrait_scale_consistency",
         "guardian_portrait_surface_distinct",
-        "guardian_live2d_layered_motion",
         "fresh_capture",
         "dialog_copy_review",
         "guardian_presence_review",
@@ -2176,7 +2161,7 @@
         "missing_expected_character",
         "guardian_portrait_cropped",
         "guardian_portrait_scale_mismatch",
-        "static_portrait_no_live2d"
+        "guardian_blink_overlay_outside_face"
       ],
       "failIfMissing": [
         "player_facing_copy",
@@ -2187,7 +2172,6 @@
         "guardian_portrait_no_crop",
         "guardian_portrait_scale_consistency",
         "guardian_portrait_surface_distinct",
-        "guardian_motion.pseudo_live2d_presence",
         "fresh_capture",
         "dialog_copy_review",
         "guardian_presence_review",
@@ -2201,7 +2185,7 @@
         "missing_expected_character",
         "guardian_portrait_cropped",
         "guardian_portrait_scale_mismatch",
-        "static_portrait_no_motion_evidence"
+        "guardian_blink_overlay_outside_face"
       ],
       "facets": [
         "dialog",
@@ -2957,20 +2941,6 @@
           "blockedIf": [
             "portraitSurfaceToken 또는 contrast metadata가 없다."
           ]
-        },
-        {
-          "id": "guardian_motion.pseudo_live2d_presence",
-          "label": "가디언 portrait가 2초 영상 또는 3 timestamp frame에서 pseudo-Live2D 레이어 변화를 가진다.",
-          "required": true,
-          "passIf": [
-            "video_2s_or_3_timestamp_frames artifact에서 눈/호흡/표정/오버레이 중 하나 이상의 portrait layer 변화가 확인된다."
-          ],
-          "failIf": [
-            "video_2s_or_3_timestamp_frames artifact에서 모든 frame의 portrait layer가 동일하다."
-          ],
-          "blockedIf": [
-            "video_2s_or_3_timestamp_frames artifact가 없다."
-          ]
         }
       ],
       "implementedEvidence": [
@@ -3131,17 +3101,17 @@
           ]
         },
         {
-          "id": "static_portrait_no_motion_evidence",
-          "label": "motion evidence에서 정지 portrait만 반복되는 패턴이 보이지 않는다.",
+          "id": "guardian_blink_overlay_outside_face",
+          "label": "blink/overlay가 전체 이미지 또는 눈/입 외 영역을 덮지 않는다.",
           "required": true,
           "passIf": [
-            "screen_artifact 또는 polish_lints가 static_portrait_no_motion_evidence 기준의 기대 상태를 구체 metadata로 충족한다."
+            "video_2s_or_3_timestamp_frames artifact 또는 screen_artifact metadata에서 blink/overlay가 비활성화되어 있거나 눈/입 전용 bounds 안에만 표시된다."
           ],
           "failIf": [
-            "screen_artifact 또는 polish_lints가 static_portrait_no_motion_evidence 기준의 금지/위반 상태를 구체 finding으로 기록한다."
+            "blink/overlay가 전체 portrait를 깜빡이게 하거나 눈/입 외 영역을 덮거나 frame 사이에서 크롭/스케일 점프를 만든다."
           ],
           "blockedIf": [
-            "static_portrait_no_motion_evidence 기준을 판정할 screen_artifact, polish_lints, transcript 중 필요한 artifact가 없다."
+            "blink/overlay 활성 여부와 overlay bounds metadata 또는 motion artifact가 없다."
           ]
         }
       ],
@@ -3154,7 +3124,6 @@
         "guardian_portrait_no_crop",
         "guardian_portrait_scale_consistency",
         "guardian_portrait_surface_distinct",
-        "guardian_live2d_layered_motion",
         "fixed_ui_overlap_review",
         "report_body_wrap_review",
         "guardian_presence_review",
@@ -3166,7 +3135,7 @@
         "missing_expected_character",
         "guardian_portrait_cropped",
         "guardian_portrait_scale_mismatch",
-        "static_portrait_no_live2d"
+        "guardian_blink_overlay_outside_face"
       ],
       "failIfMissing": [
         "long_report_context",
@@ -3177,7 +3146,6 @@
         "guardian_portrait_no_crop",
         "guardian_portrait_scale_consistency",
         "guardian_portrait_surface_distinct",
-        "guardian_motion.pseudo_live2d_presence",
         "fixed_ui_overlap_review",
         "report_body_wrap_review",
         "guardian_presence_review",
@@ -3191,7 +3159,7 @@
         "missing_expected_character",
         "guardian_portrait_cropped",
         "guardian_portrait_scale_mismatch",
-        "static_portrait_no_motion_evidence"
+        "guardian_blink_overlay_outside_face"
       ],
       "facets": [
         "report_detail",
@@ -3346,20 +3314,6 @@
           "blockedIf": [
             "portraitSurfaceToken 또는 contrast metadata가 없다."
           ]
-        },
-        {
-          "id": "guardian_motion.pseudo_live2d_presence",
-          "label": "가디언 portrait가 2초 영상 또는 3 timestamp frame에서 pseudo-Live2D 레이어 변화를 가진다.",
-          "required": true,
-          "passIf": [
-            "video_2s_or_3_timestamp_frames artifact에서 눈/호흡/표정/오버레이 중 하나 이상의 portrait layer 변화가 확인된다."
-          ],
-          "failIf": [
-            "video_2s_or_3_timestamp_frames artifact에서 모든 frame의 portrait layer가 동일하다."
-          ],
-          "blockedIf": [
-            "video_2s_or_3_timestamp_frames artifact가 없다."
-          ]
         }
       ],
       "implementedEvidence": [
@@ -3520,17 +3474,17 @@
           ]
         },
         {
-          "id": "static_portrait_no_motion_evidence",
-          "label": "motion evidence에서 정지 portrait만 반복되는 패턴이 보이지 않는다.",
+          "id": "guardian_blink_overlay_outside_face",
+          "label": "blink/overlay가 전체 이미지 또는 눈/입 외 영역을 덮지 않는다.",
           "required": true,
           "passIf": [
-            "screen_artifact 또는 polish_lints가 static_portrait_no_motion_evidence 기준의 기대 상태를 구체 metadata로 충족한다."
+            "video_2s_or_3_timestamp_frames artifact 또는 screen_artifact metadata에서 blink/overlay가 비활성화되어 있거나 눈/입 전용 bounds 안에만 표시된다."
           ],
           "failIf": [
-            "screen_artifact 또는 polish_lints가 static_portrait_no_motion_evidence 기준의 금지/위반 상태를 구체 finding으로 기록한다."
+            "blink/overlay가 전체 portrait를 깜빡이게 하거나 눈/입 외 영역을 덮거나 frame 사이에서 크롭/스케일 점프를 만든다."
           ],
           "blockedIf": [
-            "static_portrait_no_motion_evidence 기준을 판정할 screen_artifact, polish_lints, transcript 중 필요한 artifact가 없다."
+            "blink/overlay 활성 여부와 overlay bounds metadata 또는 motion artifact가 없다."
           ]
         }
       ],
@@ -3543,7 +3497,6 @@
         "guardian_portrait_no_crop",
         "guardian_portrait_scale_consistency",
         "guardian_portrait_surface_distinct",
-        "guardian_live2d_layered_motion",
         "fixed_ui_overlap_review",
         "report_body_wrap_review",
         "guardian_presence_review",
@@ -3555,7 +3508,7 @@
         "missing_expected_character",
         "guardian_portrait_cropped",
         "guardian_portrait_scale_mismatch",
-        "static_portrait_no_live2d"
+        "guardian_blink_overlay_outside_face"
       ],
       "failIfMissing": [
         "long_report_context",
@@ -3566,7 +3519,6 @@
         "guardian_portrait_no_crop",
         "guardian_portrait_scale_consistency",
         "guardian_portrait_surface_distinct",
-        "guardian_motion.pseudo_live2d_presence",
         "fixed_ui_overlap_review",
         "report_body_wrap_review",
         "guardian_presence_review",
@@ -3580,7 +3532,7 @@
         "missing_expected_character",
         "guardian_portrait_cropped",
         "guardian_portrait_scale_mismatch",
-        "static_portrait_no_motion_evidence"
+        "guardian_blink_overlay_outside_face"
       ],
       "facets": [
         "report_detail",
@@ -3777,20 +3729,6 @@
           "blockedIf": [
             "portraitSurfaceToken 또는 contrast metadata가 없다."
           ]
-        },
-        {
-          "id": "guardian_motion.pseudo_live2d_presence",
-          "label": "가디언 portrait가 2초 영상 또는 3 timestamp frame에서 pseudo-Live2D 레이어 변화를 가진다.",
-          "required": true,
-          "passIf": [
-            "video_2s_or_3_timestamp_frames artifact에서 눈/호흡/표정/오버레이 중 하나 이상의 portrait layer 변화가 확인된다."
-          ],
-          "failIf": [
-            "video_2s_or_3_timestamp_frames artifact에서 모든 frame의 portrait layer가 동일하다."
-          ],
-          "blockedIf": [
-            "video_2s_or_3_timestamp_frames artifact가 없다."
-          ]
         }
       ],
       "implementedEvidence": [
@@ -4007,17 +3945,17 @@
           ]
         },
         {
-          "id": "static_portrait_no_motion_evidence",
-          "label": "motion evidence에서 정지 portrait만 반복되는 패턴이 보이지 않는다.",
+          "id": "guardian_blink_overlay_outside_face",
+          "label": "blink/overlay가 전체 이미지 또는 눈/입 외 영역을 덮지 않는다.",
           "required": true,
           "passIf": [
-            "screen_artifact 또는 polish_lints가 static_portrait_no_motion_evidence 기준의 기대 상태를 구체 metadata로 충족한다."
+            "video_2s_or_3_timestamp_frames artifact 또는 screen_artifact metadata에서 blink/overlay가 비활성화되어 있거나 눈/입 전용 bounds 안에만 표시된다."
           ],
           "failIf": [
-            "screen_artifact 또는 polish_lints가 static_portrait_no_motion_evidence 기준의 금지/위반 상태를 구체 finding으로 기록한다."
+            "blink/overlay가 전체 portrait를 깜빡이게 하거나 눈/입 외 영역을 덮거나 frame 사이에서 크롭/스케일 점프를 만든다."
           ],
           "blockedIf": [
-            "static_portrait_no_motion_evidence 기준을 판정할 screen_artifact, polish_lints, transcript 중 필요한 artifact가 없다."
+            "blink/overlay 활성 여부와 overlay bounds metadata 또는 motion artifact가 없다."
           ]
         }
       ],
@@ -4033,7 +3971,6 @@
         "guardian_portrait_no_crop",
         "guardian_portrait_scale_consistency",
         "guardian_portrait_surface_distinct",
-        "guardian_live2d_layered_motion",
         "fixed_ui_overlap_review",
         "report_body_wrap_review",
         "choice_actor_match_review",
@@ -4049,7 +3986,7 @@
         "missing_expected_character",
         "guardian_portrait_cropped",
         "guardian_portrait_scale_mismatch",
-        "static_portrait_no_live2d"
+        "guardian_blink_overlay_outside_face"
       ],
       "failIfMissing": [
         "long_report_context",
@@ -4063,7 +4000,6 @@
         "guardian_portrait_no_crop",
         "guardian_portrait_scale_consistency",
         "guardian_portrait_surface_distinct",
-        "guardian_motion.pseudo_live2d_presence",
         "fixed_ui_overlap_review",
         "report_body_wrap_review",
         "choice_actor_match_review",
@@ -4081,7 +4017,7 @@
         "missing_expected_character",
         "guardian_portrait_cropped",
         "guardian_portrait_scale_mismatch",
-        "static_portrait_no_motion_evidence"
+        "guardian_blink_overlay_outside_face"
       ],
       "facets": [
         "report_detail",
@@ -4241,13 +4177,13 @@
         },
         {
           "id": "guardian_motion.pseudo_live2d_presence",
-          "label": "가디언 portrait가 2초 영상 또는 3 timestamp frame에서 pseudo-Live2D 레이어 변화를 가진다.",
+          "label": "가디언 portrait가 2초 영상 또는 3 timestamp frame에서 Flutter-only pseudo-Live2D 변화를 가진다.",
           "required": true,
           "passIf": [
-            "video_2s_or_3_timestamp_frames artifact에서 눈/호흡/표정/오버레이 중 하나 이상의 portrait layer 변화가 확인된다."
+            "video_2s_or_3_timestamp_frames artifact에서 idle float/호흡/오라/상태 톤 중 하나 이상의 안정적 portrait 변화가 확인된다."
           ],
           "failIf": [
-            "video_2s_or_3_timestamp_frames artifact에서 모든 frame의 portrait layer가 동일하다."
+            "video_2s_or_3_timestamp_frames artifact에서 모든 frame의 portrait 위치/스케일/오라/상태 톤이 동일하다."
           ],
           "blockedIf": [
             "video_2s_or_3_timestamp_frames artifact가 없다."
@@ -4424,6 +4360,20 @@
           "blockedIf": [
             "static_portrait_no_motion_evidence 기준을 판정할 screen_artifact, polish_lints, transcript 중 필요한 artifact가 없다."
           ]
+        },
+        {
+          "id": "guardian_blink_overlay_outside_face",
+          "label": "blink/overlay가 전체 이미지 또는 눈/입 외 영역을 덮지 않는다.",
+          "required": true,
+          "passIf": [
+            "video_2s_or_3_timestamp_frames artifact 또는 screen_artifact metadata에서 blink/overlay가 비활성화되어 있거나 눈/입 전용 bounds 안에만 표시된다."
+          ],
+          "failIf": [
+            "blink/overlay가 전체 portrait를 깜빡이게 하거나 눈/입 외 영역을 덮거나 frame 사이에서 크롭/스케일 점프를 만든다."
+          ],
+          "blockedIf": [
+            "blink/overlay 활성 여부와 overlay bounds metadata 또는 motion artifact가 없다."
+          ]
         }
       ],
       "contractChecks": [
@@ -4435,7 +4385,7 @@
         "guardian_portrait_no_crop",
         "guardian_portrait_scale_consistency",
         "guardian_portrait_surface_distinct",
-        "guardian_live2d_layered_motion",
+        "guardian_motion.pseudo_live2d_presence",
         "choice_actor_match_review",
         "choice_result_link_review",
         "guardian_presence_review",
@@ -4447,7 +4397,8 @@
         "missing_expected_character",
         "guardian_portrait_cropped",
         "guardian_portrait_scale_mismatch",
-        "static_portrait_no_live2d"
+        "static_portrait_no_motion_evidence",
+        "guardian_blink_overlay_outside_face"
       ],
       "failIfMissing": [
         "choice_intent_clear",
@@ -4472,7 +4423,8 @@
         "missing_expected_character",
         "guardian_portrait_cropped",
         "guardian_portrait_scale_mismatch",
-        "static_portrait_no_motion_evidence"
+        "static_portrait_no_motion_evidence",
+        "guardian_blink_overlay_outside_face"
       ],
       "facets": [
         "choice",
@@ -4632,13 +4584,13 @@
         },
         {
           "id": "guardian_motion.pseudo_live2d_presence",
-          "label": "가디언 portrait가 2초 영상 또는 3 timestamp frame에서 pseudo-Live2D 레이어 변화를 가진다.",
+          "label": "가디언 portrait가 2초 영상 또는 3 timestamp frame에서 Flutter-only pseudo-Live2D 변화를 가진다.",
           "required": true,
           "passIf": [
-            "video_2s_or_3_timestamp_frames artifact에서 눈/호흡/표정/오버레이 중 하나 이상의 portrait layer 변화가 확인된다."
+            "video_2s_or_3_timestamp_frames artifact에서 idle float/호흡/오라/상태 톤 중 하나 이상의 안정적 portrait 변화가 확인된다."
           ],
           "failIf": [
-            "video_2s_or_3_timestamp_frames artifact에서 모든 frame의 portrait layer가 동일하다."
+            "video_2s_or_3_timestamp_frames artifact에서 모든 frame의 portrait 위치/스케일/오라/상태 톤이 동일하다."
           ],
           "blockedIf": [
             "video_2s_or_3_timestamp_frames artifact가 없다."
@@ -4815,6 +4767,20 @@
           "blockedIf": [
             "static_portrait_no_motion_evidence 기준을 판정할 screen_artifact, polish_lints, transcript 중 필요한 artifact가 없다."
           ]
+        },
+        {
+          "id": "guardian_blink_overlay_outside_face",
+          "label": "blink/overlay가 전체 이미지 또는 눈/입 외 영역을 덮지 않는다.",
+          "required": true,
+          "passIf": [
+            "video_2s_or_3_timestamp_frames artifact 또는 screen_artifact metadata에서 blink/overlay가 비활성화되어 있거나 눈/입 전용 bounds 안에만 표시된다."
+          ],
+          "failIf": [
+            "blink/overlay가 전체 portrait를 깜빡이게 하거나 눈/입 외 영역을 덮거나 frame 사이에서 크롭/스케일 점프를 만든다."
+          ],
+          "blockedIf": [
+            "blink/overlay 활성 여부와 overlay bounds metadata 또는 motion artifact가 없다."
+          ]
         }
       ],
       "contractChecks": [
@@ -4826,7 +4792,7 @@
         "guardian_portrait_no_crop",
         "guardian_portrait_scale_consistency",
         "guardian_portrait_surface_distinct",
-        "guardian_live2d_layered_motion",
+        "guardian_motion.pseudo_live2d_presence",
         "choice_actor_match_review",
         "choice_result_link_review",
         "guardian_presence_review",
@@ -4838,7 +4804,8 @@
         "missing_expected_character",
         "guardian_portrait_cropped",
         "guardian_portrait_scale_mismatch",
-        "static_portrait_no_live2d"
+        "static_portrait_no_motion_evidence",
+        "guardian_blink_overlay_outside_face"
       ],
       "failIfMissing": [
         "choice_intent_clear",
@@ -4863,7 +4830,8 @@
         "missing_expected_character",
         "guardian_portrait_cropped",
         "guardian_portrait_scale_mismatch",
-        "static_portrait_no_motion_evidence"
+        "static_portrait_no_motion_evidence",
+        "guardian_blink_overlay_outside_face"
       ],
       "facets": [
         "choice",
@@ -5022,13 +4990,13 @@
         },
         {
           "id": "guardian_motion.pseudo_live2d_presence",
-          "label": "가디언 portrait가 2초 영상 또는 3 timestamp frame에서 pseudo-Live2D 레이어 변화를 가진다.",
+          "label": "가디언 portrait가 2초 영상 또는 3 timestamp frame에서 Flutter-only pseudo-Live2D 변화를 가진다.",
           "required": true,
           "passIf": [
-            "video_2s_or_3_timestamp_frames artifact에서 눈/호흡/표정/오버레이 중 하나 이상의 portrait layer 변화가 확인된다."
+            "video_2s_or_3_timestamp_frames artifact에서 idle float/호흡/오라/상태 톤 중 하나 이상의 안정적 portrait 변화가 확인된다."
           ],
           "failIf": [
-            "video_2s_or_3_timestamp_frames artifact에서 모든 frame의 portrait layer가 동일하다."
+            "video_2s_or_3_timestamp_frames artifact에서 모든 frame의 portrait 위치/스케일/오라/상태 톤이 동일하다."
           ],
           "blockedIf": [
             "video_2s_or_3_timestamp_frames artifact가 없다."
@@ -5205,6 +5173,20 @@
           "blockedIf": [
             "static_portrait_no_motion_evidence 기준을 판정할 screen_artifact, polish_lints, transcript 중 필요한 artifact가 없다."
           ]
+        },
+        {
+          "id": "guardian_blink_overlay_outside_face",
+          "label": "blink/overlay가 전체 이미지 또는 눈/입 외 영역을 덮지 않는다.",
+          "required": true,
+          "passIf": [
+            "video_2s_or_3_timestamp_frames artifact 또는 screen_artifact metadata에서 blink/overlay가 비활성화되어 있거나 눈/입 전용 bounds 안에만 표시된다."
+          ],
+          "failIf": [
+            "blink/overlay가 전체 portrait를 깜빡이게 하거나 눈/입 외 영역을 덮거나 frame 사이에서 크롭/스케일 점프를 만든다."
+          ],
+          "blockedIf": [
+            "blink/overlay 활성 여부와 overlay bounds metadata 또는 motion artifact가 없다."
+          ]
         }
       ],
       "contractChecks": [
@@ -5216,7 +5198,7 @@
         "guardian_portrait_no_crop",
         "guardian_portrait_scale_consistency",
         "guardian_portrait_surface_distinct",
-        "guardian_live2d_layered_motion",
+        "guardian_motion.pseudo_live2d_presence",
         "result_change_review",
         "guardian_result_match_review",
         "guardian_presence_review",
@@ -5228,7 +5210,8 @@
         "missing_expected_character",
         "guardian_portrait_cropped",
         "guardian_portrait_scale_mismatch",
-        "static_portrait_no_live2d"
+        "static_portrait_no_motion_evidence",
+        "guardian_blink_overlay_outside_face"
       ],
       "failIfMissing": [
         "result_effects_visible",
@@ -5253,7 +5236,8 @@
         "missing_expected_character",
         "guardian_portrait_cropped",
         "guardian_portrait_scale_mismatch",
-        "static_portrait_no_motion_evidence"
+        "static_portrait_no_motion_evidence",
+        "guardian_blink_overlay_outside_face"
       ],
       "facets": [
         "result",
@@ -5864,20 +5848,6 @@
           "blockedIf": [
             "portraitSurfaceToken 또는 contrast metadata가 없다."
           ]
-        },
-        {
-          "id": "guardian_motion.pseudo_live2d_presence",
-          "label": "가디언 portrait가 2초 영상 또는 3 timestamp frame에서 pseudo-Live2D 레이어 변화를 가진다.",
-          "required": true,
-          "passIf": [
-            "video_2s_or_3_timestamp_frames artifact에서 눈/호흡/표정/오버레이 중 하나 이상의 portrait layer 변화가 확인된다."
-          ],
-          "failIf": [
-            "video_2s_or_3_timestamp_frames artifact에서 모든 frame의 portrait layer가 동일하다."
-          ],
-          "blockedIf": [
-            "video_2s_or_3_timestamp_frames artifact가 없다."
-          ]
         }
       ],
       "implementedEvidence": [
@@ -6024,17 +5994,17 @@
           ]
         },
         {
-          "id": "static_portrait_no_motion_evidence",
-          "label": "motion evidence에서 정지 portrait만 반복되는 패턴이 보이지 않는다.",
+          "id": "guardian_blink_overlay_outside_face",
+          "label": "blink/overlay가 전체 이미지 또는 눈/입 외 영역을 덮지 않는다.",
           "required": true,
           "passIf": [
-            "screen_artifact 또는 polish_lints가 static_portrait_no_motion_evidence 기준의 기대 상태를 구체 metadata로 충족한다."
+            "video_2s_or_3_timestamp_frames artifact 또는 screen_artifact metadata에서 blink/overlay가 비활성화되어 있거나 눈/입 전용 bounds 안에만 표시된다."
           ],
           "failIf": [
-            "screen_artifact 또는 polish_lints가 static_portrait_no_motion_evidence 기준의 금지/위반 상태를 구체 finding으로 기록한다."
+            "blink/overlay가 전체 portrait를 깜빡이게 하거나 눈/입 외 영역을 덮거나 frame 사이에서 크롭/스케일 점프를 만든다."
           ],
           "blockedIf": [
-            "static_portrait_no_motion_evidence 기준을 판정할 screen_artifact, polish_lints, transcript 중 필요한 artifact가 없다."
+            "blink/overlay 활성 여부와 overlay bounds metadata 또는 motion artifact가 없다."
           ]
         }
       ],
@@ -6047,7 +6017,6 @@
         "guardian_portrait_no_crop",
         "guardian_portrait_scale_consistency",
         "guardian_portrait_surface_distinct",
-        "guardian_live2d_layered_motion",
         "archive_detail_review",
         "guardian_presence_review",
         "guardian_portrait_crop_review",
@@ -6058,7 +6027,7 @@
         "missing_expected_character",
         "guardian_portrait_cropped",
         "guardian_portrait_scale_mismatch",
-        "static_portrait_no_live2d"
+        "guardian_blink_overlay_outside_face"
       ],
       "failIfMissing": [
         "archive_value_clear",
@@ -6069,7 +6038,6 @@
         "guardian_portrait_no_crop",
         "guardian_portrait_scale_consistency",
         "guardian_portrait_surface_distinct",
-        "guardian_motion.pseudo_live2d_presence",
         "archive_detail_review",
         "guardian_presence_review",
         "guardian_portrait_crop_review"
@@ -6082,7 +6050,7 @@
         "missing_expected_character",
         "guardian_portrait_cropped",
         "guardian_portrait_scale_mismatch",
-        "static_portrait_no_motion_evidence"
+        "guardian_blink_overlay_outside_face"
       ],
       "facets": [
         "archive",

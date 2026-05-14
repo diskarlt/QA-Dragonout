@@ -153,6 +153,11 @@ try {
   });
   assert(fast.status === 202, 'fast QA starts');
   assert(fast.json.job.mode === 'fast', 'fast QA job mode is recorded');
+  const running = await getJson('/api/status');
+  assert(typeof running.activeJob.elapsedMs === 'number', 'active job exposes elapsed time');
+  assert(running.activeJob.lastHeartbeatAt, 'active job exposes last heartbeat');
+  assert(running.activeJob.stale === false, 'fresh active job is not stale');
+  assert(typeof running.activeJob.staleThresholdMs === 'number', 'active job exposes stale threshold');
 
   const duplicate = await postJson('/api/run/full', {
     targetWorktree: '/Users/euna/Developer/Dragonout',

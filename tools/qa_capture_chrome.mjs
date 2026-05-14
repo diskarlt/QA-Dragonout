@@ -128,6 +128,14 @@ if (headless) {
 }
 
 const chrome = spawn(chromePath, chromeArgs, { stdio: 'ignore' });
+let shutdownInProgress = false;
+
+process.once('SIGTERM', () => {
+  shutdownAfterSignal('SIGTERM').catch(() => process.exit(130));
+});
+process.once('SIGINT', () => {
+  shutdownAfterSignal('SIGINT').catch(() => process.exit(130));
+});
 
 try {
   await waitForDebugger();
@@ -243,6 +251,18 @@ try {
   updateLiveReport('running', 'capture', `캡처 결과 저장: ${results.length}/${targets.length}`, results.length, targets.length);
 }
 
+async function shutdownAfterSignal(signal) {
+  if (shutdownInProgress) return;
+  shutdownInProgress = true;
+  updateLiveReport('failed', 'capture', `캡처 중단: ${signal}`, results.length, targets.length);
+  chrome.kill('SIGTERM');
+  await rm(userDataDir, { recursive: true, force: true }).catch(() => {});
+  await writeCaptureResult().catch(() => {});
+  await writeScreenArtifacts().catch(() => {});
+  await writeMotionArtifacts().catch(() => {});
+  process.exit(130);
+}
+
 async function writeCaptureResult() {
   await writeFile(
     join(reportDir, 'capture_result.json'),
@@ -317,6 +337,8 @@ function updateLiveReport(status, phase, message, current, total) {
     String(current),
     '--total',
     String(total),
+    '--generate',
+    '0',
   ], {
     cwd: process.cwd(),
     env: process.env,
@@ -563,16 +585,33 @@ function buildScreenArtifact(target, captureResult, domMeta, viewport) {
   let renderedGuardians = [];
   let guardianSource = null;
   if (snap?.guardians?.length > 0) {
-    renderedGuardians = snap.guardians.map(g => ({
-      guardianId: g.guardianId,
-      displayName: g.displayName,
-      portraitAssetId: g.portraitAssetId ?? null,
-      semanticId: g.portraitAssetId ?? g.guardianId,
-      state: g.state ?? 'unknown',
-      bounds: g.bounds ?? null,
-      visible: g.visible ?? true,
-      evidence: 'qa_snapshot',
-    }));
+    renderedGuardians = snap.guardians.map(g => {
+      const portraitBounds = g.portraitBounds ?? g.bounds ?? null;
+      return {
+        ...g,
+        guardianId: g.guardianId,
+        displayName: g.displayName,
+        portraitAssetId: g.portraitAssetId ?? null,
+        semanticId: g.semanticId ?? g.portraitAssetId ?? g.guardianId,
+        state: g.state ?? 'unknown',
+        bounds: portraitBounds,
+        portraitBounds,
+        safeArea: g.safeArea ?? null,
+        headCrop: g.headCrop ?? false,
+        cropped: g.cropped ?? false,
+        faceScale: g.faceScale ?? null,
+        focusScale: g.focusScale ?? null,
+        cropSize: g.cropSize ?? null,
+        coordinateSpace: g.coordinateSpace ?? null,
+        sourceEyeMidpointPx: g.sourceEyeMidpointPx ?? null,
+        eyeMidpointDeltaPx: g.eyeMidpointDeltaPx ?? null,
+        projectedEyeMidpointPx: g.projectedEyeMidpointPx ?? null,
+        projectedHeadTopPx: g.projectedHeadTopPx ?? null,
+        qaMetricThresholds: g.qaMetricThresholds ?? null,
+        visible: g.visible ?? true,
+        evidence: 'qa_snapshot',
+      };
+    });
     renderedGuardians = filterExpectedGuardians(target, renderedGuardians);
     guardianSource = 'qa_snapshot';
   } else if (domMeta.ariaGuardians?.length > 0) {

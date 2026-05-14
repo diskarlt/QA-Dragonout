@@ -1,41 +1,42 @@
-# QA-Dragonout 코드 레벨 contract와 정량 이미지 판정 PLAN
+# QA-Dragonout M3 guardian portrait 출시 품질 QA PLAN
 
 문서 상태: active  
-최종 갱신: 2026-05-13  
+최종 갱신: 2026-05-14  
 대상 스펙: `SPEC.md`
 
 ## 1. 준비
 
 - `/Users/euna/Developer/QA-Dragonout`와 `/Users/euna/Developer/Dragonout`의 git 상태를 확인한다.
-- 작업 브랜치는 `feature/quantitative-qa-contracts`를 사용한다.
-- GitHub issue 생성은 인증 만료로 보류하고 `LOCAL-QA-001`로 로컬 추적한다.
+- 작업 브랜치는 `feature/m3-portrait-qa-contract`를 사용한다.
+- 추적 이슈는 GitHub issue #15를 사용한다.
 
-## 2. Red
+## 2. M3 계약 반영
 
-- speaker expected/actual id mismatch가 FAIL이 되는 fixture를 추가한다.
-- visitor head/core visible fraction 미달이 FAIL이 되는 fixture를 추가한다.
-- metadata가 부족하면 BLOCKED가 되는 fixture를 추가한다.
+- Dragonout M3 기준의 `qa_matrix.json`와 `qa_fixed_rules.json`를 canonical runner에 동기화한다.
+- `guardian_motion.pseudo_live2d_presence`를 CAL-S02 필수 룰로 사용하고, 과거 underscore id는 호환 alias로만 처리한다.
+- `guardian_blink_overlay_outside_face`는 화면별 forbidden criterion으로 두고 fixed rule에서는 제거한다.
 
-## 3. Green
+## 3. 검증 구조 정리
 
-- `qa_capture_chrome.mjs`가 `sceneContract`와 `visualSubjects`를 screen artifact에 기록하게 한다.
-- 정량 contract evaluator를 추가한다.
-- `qa_write_current_reviews.mjs`에서 evaluator 결과를 product screen `qa_issues`에 합친다.
-- evidence는 expected/actual id, fit, visible fraction, bounds를 한국어 문장으로 남긴다.
+- CAL-S02 필수 rule 목록은 `qa_queue_model.mjs`의 단일 목록에서 재사용한다.
+- motion artifact 요구 화면은 matrix의 실제 screen id와 motion criterion에서 계산한다.
+- fixed rule의 target이 matrix screen id가 아니면 motion artifact 필수 화면으로 추가하지 않는다.
+- capture/review 경로는 Dragonout snapshot의 `portraitBounds`, `safeArea`, `faceScale`, `eyeMidpointDeltaPx`, `projectedHeadTopPx`를 보존하고, semantic fallback만으로 crop/scale PASS를 선언하지 않는다.
+- 테스트 fixture는 M3 dot id와 Flutter-only pseudo-Live2D 문구를 기준으로 갱신한다.
+- runner status는 `elapsedMs`, `lastHeartbeatAt`, `stale`, `childProgress`를 노출해 캡처가 실제 정지했는지 판단 가능하게 한다.
+- `qa_capture_chrome.mjs`의 live status update는 `--generate 0`으로 JSON만 갱신하고, HTML report 생성은 runner의 report 단계로 모은다.
+- `runProcessStep`은 단계 timeout과 SIGTERM/SIGKILL 정리를 수행하고, `qa_capture_chrome.mjs`는 SIGTERM/SIGINT 시 Chrome과 임시 profile을 정리한다.
 
-## 4. Refactor
-
-- crop 계산은 helper 함수로 분리한다.
-- 기존 guardian matrix 판정은 유지하되, `sceneContract`가 있으면 새 코드 레벨 contract를 우선 근거로 사용한다.
-- 이미지 기반 정성 판단 문구가 새 contract path에 들어가지 않게 테스트한다.
-
-## 5. 검증
+## 4. 검증
 
 - `node tools/qa_quantitative_contracts_tests.mjs`
 - `node tools/qa_validate_report_tests.mjs`
-- 필요 시 기존 runner/client 단위 테스트는 추가 실행한다.
+- `node tools/qa_runner_server_tests.mjs`
+- `node tools/qa_dashboard_client_tests.mjs`
+- Dragonout target에 대해 Fast QA 후 Full QA를 실행한다.
 
-## 6. 완료
+## 5. 완료
 
-- `TODO.md`의 `LOCAL-QA-001` 항목은 구현과 테스트가 끝난 뒤에만 체크한다.
-- 최종 보고에 변경 파일, 테스트 결과, 미실행 QA와 사유를 기록한다.
+- QA-Dragonout 변경을 커밋하고 PR을 열어 issue #15와 연결한다.
+- 테스트와 QA가 PASS이면 PR을 merge한다.
+- Dragonout PR의 Full QA 근거와 동일한 M3 기준을 최종 보고에 함께 남긴다.

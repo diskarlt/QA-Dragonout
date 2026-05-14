@@ -5,6 +5,7 @@ import { cp, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promi
 import { createReadStream } from 'node:fs';
 import { extname, join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 
 const runnerRoot = resolve(process.cwd());
 const canonicalRunnerRoot = resolve(process.env.QA_CANONICAL_RUNNER_ROOT ?? '/Users/euna/Developer/QA-Dragonout');
@@ -20,6 +21,10 @@ const testDelayMs = Number(process.env.QA_RUNNER_TEST_DELAY_MS ?? 0);
 const allowedRoot = '/Users/euna/Developer';
 const dashboardVersion = 'calibration-readability-v1';
 const serverStartedAt = new Date().toISOString();
+const staleJobThresholdMs = Number(process.env.QA_STALE_JOB_THRESHOLD_MS ?? 90_000);
+const processStepTimeoutMs = Number(process.env.QA_PROCESS_STEP_TIMEOUT_MS ?? 600_000);
+const processStepKillGraceMs = Number(process.env.QA_PROCESS_STEP_KILL_GRACE_MS ?? 2_500);
+const processStepPollMs = Number(process.env.QA_PROCESS_STEP_POLL_MS ?? 1_000);
 let currentReportDir = defaultReportDir;
 let currentScreenshotDir = defaultScreenshotDir;
 let activeJob = null;
@@ -142,6 +147,8 @@ async function startJobFromRequest(request, response, mode) {
     events: [],
     children: [],
     cancelled: false,
+    lastHeartbeatAt: new Date().toISOString(),
+    childProgress: null,
     automatedGate: 'not_started',
     codexReview: 'not_entered',
     finalStatus: 'not_started',
@@ -185,7 +192,7 @@ async function runJob(job) {
     }
     await runProcessStep(job, 'tests', 'flutter analyze', 'flutter', ['analyze'], { cwd: job.targetWorktree });
     await runProcessStep(job, 'tests', 'flutter test', 'flutter', ['test'], { cwd: job.targetWorktree });
-    if (job.mode === 'full') {
+    if (shouldBuildTargetWeb(job)) {
       await runProcessStep(job, 'build', 'flutter build web --debug', 'flutter', ['build', 'web', '--debug'], { cwd: job.targetWorktree });
     }
     await runCapturePipeline(job);
@@ -236,6 +243,7 @@ async function runJob(job) {
 
 async function runCapturePipeline(job) {
   await mkdir(job.screenshotDir, { recursive: true });
+  const sourceHash = await sourceHashForJob(job);
   await runProcessStep(job, 'build', 'target web server 시작', process.execPath, [
     '-e',
     serverSnippet(job.targetWorktree),
@@ -258,6 +266,8 @@ async function runCapturePipeline(job) {
         QA_SCREENSHOT_DIR: job.screenshotDir,
         QA_LIVE_STATUS_PATH: join(job.reportDir, 'qa_live_status.json'),
         QA_LIVE_REPORT: '1',
+        QA_CHANGED_FILES: job.changedFiles.join('\n'),
+        QA_SOURCE_HASH: sourceHash,
       },
     });
     await runNonBlockingLintStep(job);
@@ -275,6 +285,41 @@ async function runCapturePipeline(job) {
   } finally {
     serverChild?.kill('SIGTERM');
   }
+}
+
+function shouldBuildTargetWeb(job) {
+  if (job.mode === 'full') return true;
+  return job.changedFiles.some((file) => {
+    const normalized = String(file ?? '').replaceAll('\\', '/');
+    return normalized.startsWith('lib/') ||
+      normalized.startsWith('assets/') ||
+      normalized.startsWith('web/') ||
+      normalized === 'pubspec.yaml' ||
+      normalized === 'pubspec.lock';
+  });
+}
+
+async function sourceHashForJob(job) {
+  const hash = createHash('sha256');
+  hash.update(job.mode);
+  hash.update('\n');
+  hash.update(job.changedFiles.join('\n'));
+  for (const file of job.changedFiles) {
+    const normalized = String(file ?? '').replaceAll('\\', '/').replace(/^\/+/, '');
+    if (!normalized || normalized.includes('..')) continue;
+    const path = resolve(job.targetWorktree, normalized);
+    if (!path.startsWith(`${resolve(job.targetWorktree)}/`)) continue;
+    try {
+      hash.update('\nFILE ');
+      hash.update(normalized);
+      hash.update('\n');
+      hash.update(await readFile(path));
+    } catch {
+      hash.update('\nMISSING ');
+      hash.update(normalized);
+    }
+  }
+  return hash.digest('hex').slice(0, 16);
 }
 
 async function runNonBlockingLintStep(job) {
@@ -407,16 +452,42 @@ async function runProcessStep(job, phase, message, command, args, options = {}) 
   let stderr = '';
   child.stdout?.on('data', (chunk) => {
     stdout += chunk.toString();
+    job.lastHeartbeatAt = new Date().toISOString();
   });
   child.stderr?.on('data', (chunk) => {
     stderr += chunk.toString();
+    job.lastHeartbeatAt = new Date().toISOString();
   });
   if (options.keepChild) {
     return;
   }
-  const code = await new Promise((resolve) => child.on('close', resolve));
+  const timeoutMs = Number(options.timeoutMs ?? processStepTimeoutMs);
+  let timeoutError = null;
+  const timeoutTimer = setTimeout(() => {
+    timeoutError = new Error(`${message} timed out after ${timeoutMs}ms`);
+    job.lastError = timeoutError.message;
+    job.nextAction = nextActionForFailure(phase);
+    terminateChild(child);
+  }, timeoutMs);
+  const pollTimer = setInterval(() => {
+    syncChildLiveStatus(job).catch(() => {});
+  }, processStepPollMs);
+  const { code, signal } = await new Promise((resolve) => {
+    child.on('close', (exitCode, exitSignal) => resolve({ code: exitCode, signal: exitSignal }));
+  });
+  clearTimeout(timeoutTimer);
+  clearInterval(pollTimer);
+  await syncChildLiveStatus(job).catch(() => {});
   job.children = job.children.filter((item) => item !== child);
   job.lastOutput = trimOutput(stdout);
+  if (timeoutError) {
+    job.lastError = timeoutError.message;
+    throw timeoutError;
+  }
+  if (signal && code === null) {
+    job.lastError = `${message} terminated by ${signal}`;
+    throw new Error(job.lastError);
+  }
   if (code !== 0) {
     job.lastError = trimOutput(stderr);
     if (phase === 'lint') {
@@ -451,6 +522,39 @@ async function runCommand(command, args, options = {}) {
   return { stdout, stderr };
 }
 
+function terminateChild(child) {
+  if (!child || child.exitCode !== null) return;
+  child.kill('SIGTERM');
+  const timer = setTimeout(() => {
+    if (child.exitCode === null) {
+      child.kill('SIGKILL');
+    }
+  }, processStepKillGraceMs);
+  timer.unref?.();
+}
+
+async function syncChildLiveStatus(job) {
+  const liveStatus = await readJsonIfExists(join(job.reportDir, 'qa_live_status.json'));
+  if (!liveStatus || liveStatus.run_id !== job.id) return;
+  job.childProgress = {
+    phase: liveStatus.phase ?? null,
+    message: liveStatus.message ?? null,
+    current: liveStatus.current ?? null,
+    total: liveStatus.total ?? null,
+    screenshotCount: liveStatus.screenshotCount ?? null,
+    updatedAt: liveStatus.updated_at ?? null,
+  };
+  if (liveStatus.updated_at) {
+    job.lastHeartbeatAt = liveStatus.updated_at;
+  }
+  if (job.status === 'running' && liveStatus.status === 'running') {
+    job.phase = liveStatus.phase ?? job.phase;
+    job.message = liveStatus.message ?? job.message;
+    if (Number.isFinite(Number(liveStatus.current))) job.current = Number(liveStatus.current);
+    if (Number.isFinite(Number(liveStatus.total))) job.total = Number(liveStatus.total);
+  }
+}
+
 async function markJob(job, status, phase, message, current = job.current, total = job.total) {
   job.status = status;
   job.phase = phase;
@@ -458,6 +562,7 @@ async function markJob(job, status, phase, message, current = job.current, total
   job.current = current;
   job.total = total;
   const event = { at: new Date().toISOString(), phase, status, message };
+  job.lastHeartbeatAt = event.at;
   job.events.push(event);
   const screenshotCount = await countScreenshots(job.screenshotDir);
   const finalStatusForReport = job.finalStatus === 'pass' ? 'PASS' : job.finalStatus;
@@ -505,7 +610,7 @@ async function cancelJob(response) {
   const job = activeJob;
   job.cancelled = true;
   for (const child of job.children) {
-    child.kill('SIGTERM');
+    terminateChild(child);
   }
   await markJob(job, 'cancelled', 'cancelled', '사용자가 QA job을 취소했습니다.');
   writeJson(response, 200, { cancelled: true, job: publicJob(job) });
@@ -513,6 +618,9 @@ async function cancelJob(response) {
 }
 
 async function statusPayload() {
+  if (activeJob) {
+    await syncChildLiveStatus(activeJob).catch(() => {});
+  }
   return {
     server: serverIdentity(),
     activeJob: activeJob ? publicJob(activeJob) : null,
@@ -1171,6 +1279,12 @@ async function screenshotPayload() {
 }
 
 function publicJob(job) {
+  const startedAtMs = new Date(job.startedAt).getTime();
+  const heartbeatAtMs = new Date(job.lastHeartbeatAt ?? job.startedAt).getTime();
+  const now = Date.now();
+  const elapsedMs = Number.isFinite(startedAtMs) ? now - startedAtMs : null;
+  const staleMs = Number.isFinite(heartbeatAtMs) ? now - heartbeatAtMs : null;
+  const stale = job.status === 'running' && Number.isFinite(staleMs) && staleMs > staleJobThresholdMs;
   return {
     id: job.id,
     mode: job.mode,
@@ -1183,6 +1297,12 @@ function publicJob(job) {
     current: job.current,
     total: job.total,
     startedAt: job.startedAt,
+    elapsedMs,
+    lastHeartbeatAt: job.lastHeartbeatAt ?? null,
+    stale,
+    staleMs,
+    staleThresholdMs: staleJobThresholdMs,
+    childProgress: job.childProgress ?? null,
     changedFiles: job.changedFiles,
     automatedGate: job.automatedGate,
     codexReview: job.codexReview,

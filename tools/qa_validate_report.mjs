@@ -57,6 +57,15 @@ const userRegressionScreenIds = new Set([
   'location_dialog',
   'outing',
 ]);
+const MOTION_EVIDENCE_ARTIFACT = 'video_2s_or_3_timestamp_frames';
+const MOTION_RULE_LABEL = 'guardian_motion.pseudo_live2d_presence';
+const MOTION_RULE_IDS = new Set([
+  'guardian_live2d_layered_motion',
+  'guardian_motion.pseudo_live2d_presence',
+  'guardian_motion_pseudo_live2d_presence',
+  'static_portrait_no_live2d',
+  'static_portrait_no_motion_evidence',
+]);
 
 const errors = [];
 const warnings = [];
@@ -867,13 +876,7 @@ async function validateFixedRules() {
         .filter((rule) => rule.source_candidate_id === 'CAL-S02')
         .map((rule) => rule.rule_id),
     );
-    for (const ruleId of [
-      'guardian_presence_exact',
-      'guardian_portrait_scale_consistency',
-      'guardian_portrait_no_crop',
-      'guardian_motion_pseudo_live2d_presence',
-      'cta_ssot_contract',
-    ]) {
+    for (const ruleId of REQUIRED_BASE_STATUS_RULE_IDS) {
       if (!calS02Rules.has(ruleId)) {
         errors.push(`CAL-S02 fixed QA rule missing: ${ruleId}`);
       }
@@ -1107,13 +1110,7 @@ async function validateHtmlReport() {
       }
     }
     if (screens.some((s) => s.id === 'base_status')) {
-      for (const ruleId of [
-        'guardian_presence_exact',
-        'guardian_portrait_scale_consistency',
-        'guardian_portrait_no_crop',
-        'guardian_motion_pseudo_live2d_presence',
-        'cta_ssot_contract',
-      ]) {
+      for (const ruleId of REQUIRED_BASE_STATUS_RULE_IDS) {
         if (!html.includes(ruleId)) {
           errors.push(`report.html missing CAL-S02 regression rule id: ${ruleId}`);
         }
@@ -1129,13 +1126,12 @@ async function validateHtmlReport() {
 }
 
 async function validateMotionArtifacts() {
-  const MOTION_RULE_ID = 'guardian_motion_pseudo_live2d_presence';
   const motionScreenIds = requiredMotionArtifactScreenIds();
   if (motionScreenIds.size === 0) return;
 
   if (!(await fileExists(motionArtifactsPath))) {
     for (const screenId of motionScreenIds) {
-      errors.push(`motion_artifacts.json missing — ${MOTION_RULE_ID} cannot be judged for ${screenId}; must be BLOCKED.`);
+      errors.push(`motion_artifacts.json missing — ${MOTION_RULE_LABEL} cannot be judged for ${screenId}; must be BLOCKED.`);
     }
     return;
   }
@@ -1148,11 +1144,11 @@ async function validateMotionArtifacts() {
   for (const screenId of motionScreenIds) {
     const artifact = artifactsByScreen.get(screenId);
     if (!artifact) {
-      errors.push(`motion_artifacts.json missing entry for ${screenId} — ${MOTION_RULE_ID} must be BLOCKED.`);
+      errors.push(`motion_artifacts.json missing entry for ${screenId} — ${MOTION_RULE_LABEL} must be BLOCKED.`);
       continue;
     }
     if (artifact.status === 'failed') {
-      errors.push(`motion artifact for ${screenId} has status=failed — ${MOTION_RULE_ID} must be BLOCKED.`);
+      errors.push(`motion artifact for ${screenId} has status=failed — ${MOTION_RULE_LABEL} must be BLOCKED.`);
     }
     if (!artifact.frames || artifact.frames.length < 3) {
       errors.push(`motion artifact for ${screenId} has fewer than 3 frames — capture is incomplete.`);
@@ -1167,13 +1163,13 @@ async function validateMotionArtifacts() {
     for (const issue of screen.qa_issues ?? []) {
       if (!isMotionCriterionId(issue.rule_id)) continue;
       if (issue.status === 'PASS' && !hasArtifact) {
-        errors.push(`${screen.id} ${MOTION_RULE_ID} is PASS but no valid motion artifact exists — must be BLOCKED.`);
+        errors.push(`${screen.id} ${MOTION_RULE_LABEL} is PASS but no valid motion artifact exists — must be BLOCKED.`);
       }
     }
     for (const rule of screen.fixed_rules ?? []) {
       if (!requiresMotionEvidence(rule)) continue;
       if (rule.verdict === 'PASS' && !hasArtifact) {
-        errors.push(`${screen.id} fixed rule ${MOTION_RULE_ID} verdict=PASS without motion artifact — must be BLOCKED.`);
+        errors.push(`${screen.id} fixed rule ${MOTION_RULE_LABEL} verdict=PASS without motion artifact — must be BLOCKED.`);
       }
     }
   }
@@ -1181,18 +1177,14 @@ async function validateMotionArtifacts() {
 
 function requiredMotionArtifactScreenIds() {
   const ids = new Set();
+  const matrixScreenIds = new Set((screens ?? []).map((screen) => screen.id));
   for (const screen of screens ?? []) {
-    const criteria = [
-      ...(screen.expected ?? []),
-      ...(screen.implementedEvidence ?? []),
-      ...(screen.forbidden ?? []),
-    ];
-    if (criteria.some((item) => isMotionCriterionId(item.id))) {
+    if (matrixCriteriaForScreen(screen).some((item) => isMotionCriterionId(criterionId(item)))) {
       ids.add(screen.id);
     }
   }
   for (const rule of fixedRules ?? []) {
-    if (requiresMotionEvidence(rule) && !isBlank(rule.target_id)) {
+    if (requiresMotionEvidence(rule) && matrixScreenIds.has(rule.target_id)) {
       ids.add(rule.target_id);
     }
   }
@@ -1200,13 +1192,29 @@ function requiredMotionArtifactScreenIds() {
 }
 
 function requiresMotionEvidence(rule) {
-  return (rule?.requires_evidence ?? []).includes('video_2s_or_3_timestamp_frames') ||
+  return (rule?.requires_evidence ?? []).includes(MOTION_EVIDENCE_ARTIFACT) ||
     isMotionCriterionId(rule?.rule_id);
+}
+
+function matrixCriteriaForScreen(screen) {
+  return [
+    ...(screen.expected ?? []),
+    ...(screen.implementedEvidence ?? []),
+    ...(screen.forbidden ?? []),
+    ...(screen.contractChecks ?? []),
+    ...(screen.failIfMissing ?? []),
+    ...(screen.failIfPresent ?? []),
+  ];
+}
+
+function criterionId(item) {
+  if (typeof item === 'string') return item;
+  return item?.id ?? item?.rule_id ?? item?.criterion_id;
 }
 
 function isMotionCriterionId(id) {
   const text = String(id ?? '').toLowerCase();
-  return text.includes('motion') || text.includes('live2d');
+  return MOTION_RULE_IDS.has(text) || text.includes('motion') || text.includes('live2d');
 }
 
 async function validateMarkdownReport() {
@@ -1249,13 +1257,7 @@ async function validateCalibrationSetupHtml() {
     }
   }
   if (screens.some((s) => s.id === 'base_status')) {
-    for (const ruleId of [
-      'guardian_presence_exact',
-      'guardian_portrait_scale_consistency',
-      'guardian_portrait_no_crop',
-      'guardian_motion_pseudo_live2d_presence',
-      'cta_ssot_contract',
-    ]) {
+    for (const ruleId of REQUIRED_BASE_STATUS_RULE_IDS) {
       if (!html.includes(ruleId)) {
         errors.push(`calibration.html missing CAL-S02 rule draft: ${ruleId}`);
       }

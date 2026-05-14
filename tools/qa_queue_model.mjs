@@ -12,7 +12,7 @@ export const REQUIRED_BASE_STATUS_RULE_IDS = [
   'guardian_presence_exact',
   'guardian_portrait_scale_consistency',
   'guardian_portrait_no_crop',
-  'guardian_motion_pseudo_live2d_presence',
+  'guardian_motion.pseudo_live2d_presence',
   'cta_ssot_contract',
 ];
 
@@ -54,9 +54,10 @@ export function issueFromFixedRule(rule, options = {}) {
   const passCondition = String(rule.pass_criteria ?? '').trim();
   const recommendedFix = String(rule.recommended_fix ?? '').trim();
   const requiredEvidence = normalizeStringList(rule.requires_evidence);
+  const issueId = options.id ?? `${targetId}.${rule.rule_id}.fixed_rule`;
   if (requiredEvidence.includes('video_2s_or_3_timestamp_frames') && options.motionEvidenceAvailable !== true) {
     return blockedIssue({
-      id: `${targetId}.${rule.rule_id}`,
+      id: issueId,
       source: options.source ?? (targetType === 'flow' ? 'playthrough_review' : 'product_review'),
       targetType,
       targetId,
@@ -77,7 +78,7 @@ export function issueFromFixedRule(rule, options = {}) {
     });
   }
   return normalizeQaIssue({
-    id: `${targetId}.${rule.rule_id}`,
+    id: issueId,
     source: options.source ?? (targetType === 'flow' ? 'playthrough_review' : 'product_review'),
     target_type: targetType,
     target_id: targetId,

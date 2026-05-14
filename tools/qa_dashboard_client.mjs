@@ -63,6 +63,21 @@ async function run(mode) {
 async function doctor() {
   const health = await tryGetHealth();
   if (isCanonicalHealth(health)) {
+    const statusPayload = await getJson('/api/status').catch(() => null);
+    if (statusPayload?.activeJob?.stale) {
+      console.log(JSON.stringify({
+        ok: false,
+        status: 'stale_active_job',
+        dashboardUrl,
+        runnerRoot: health.runnerRoot,
+        pid: health.pid,
+        reportDir: health.reportDir,
+        activeJob: statusPayload.activeJob,
+        nextAction: 'activeJob.lastHeartbeatAt과 childProgress를 확인하고, 필요하면 /api/cancel 또는 runner 재시작으로 하위 프로세스를 정리하세요.',
+      }, null, 2));
+      process.exitCode = 2;
+      return;
+    }
     console.log(JSON.stringify({
       ok: true,
       status: 'canonical_runner_active',

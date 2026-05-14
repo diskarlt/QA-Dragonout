@@ -46,6 +46,74 @@ const tests = [
     },
   ],
   [
+    'qa queue blocker prevents false PASS report',
+    async (dir) => {
+      await makeStrictPassFixture(dir);
+      await editReview(dir, (review) => {
+        review.status = 'blocked';
+        const screen = review.screens.find((item) => item.id === 'base_status');
+        screen.status = 'blocked';
+        screen.ship_readiness = 'evidence_missing';
+        screen.qa_issues.push({
+          id: 'base_status.false_pass_blocked_fixture',
+          source: 'product_review',
+          target_type: 'screen',
+          target_id: 'base_status',
+          status: 'BLOCKED',
+          severity: 'P2',
+          category: 'qa_evidence',
+          evidence: {
+            screenshot: 'final_04_base_status.png',
+            observed: 'final_04_base_status.png 원본 크기에서 가디언 초상 motion 증거가 없어 PASS를 단정할 수 없다.',
+          },
+          expected: '가디언 초상 motion 기준은 3개 timestamp frame 또는 2초 비디오 증거로 확인되어야 한다.',
+          missing_evidence: ['3개 timestamp frame', '2초 비디오 증거'],
+          required_artifact: ['video_2s_or_3_timestamp_frames'],
+          blocked_reason: '정지 캡처만으로 Live2D-like motion 기준을 PASS로 승인할 수 없다.',
+          pass_condition: 'motion artifact를 추가한 뒤 동일 기준이 PASS 또는 FAIL로 재분류되어야 한다.',
+          recommended_fix: 'motion evidence artifact를 캡처해 QA Queue를 재분류한다.',
+          source_pointer: 'codex_product_review.json:screens:base_status:false_pass_blocked_fixture',
+        });
+      });
+      generateReport(dir, { mode: 'full', expect: 'not_pass' });
+      expectPass(dir, { expect: 'not_pass' });
+      const html = await readFile(join(dir, 'report.html'), 'utf8');
+      if (!html.includes('최종 상태: QA 미통과')) throw new Error('expected blocker report to stay not_pass');
+      if (!html.includes('PASS 차단 항목')) throw new Error('expected report to expose pass blockers');
+      expectFail(dir, 'final PASS requires empty qa_queue');
+    },
+  ],
+  [
+    'product review pass with blocked qa issue fails derived gate',
+    async (dir) => {
+      await makeStrictPassFixture(dir);
+      await editReview(dir, (review) => {
+        const screen = review.screens[0];
+        screen.qa_issues.push({
+          id: `${screen.id}.blocked_despite_pass`,
+          source: 'product_review',
+          target_type: 'screen',
+          target_id: screen.id,
+          status: 'BLOCKED',
+          severity: 'P2',
+          category: 'qa_evidence',
+          evidence: {
+            screenshot: 'final_01_loading.png',
+            observed: 'final_01_loading.png 원본 크기에서 금지 항목 부재를 확인할 추가 artifact가 부족하다.',
+          },
+          expected: 'PASS 선언 전에는 금지 항목 부재와 화면 문구 근거가 모두 확인되어야 한다.',
+          missing_evidence: ['금지 항목 부재 근거', '원본 크기 확대 확인'],
+          required_artifact: ['original_size_review_note'],
+          blocked_reason: 'status=pass와 BLOCKED qa_issue가 동시에 존재해 최종 PASS를 신뢰할 수 없다.',
+          pass_condition: 'BLOCKED 항목을 PASS 또는 FAIL로 재분류한 뒤에만 status=pass를 유지한다.',
+          recommended_fix: '원본 크기 검수 근거를 보강하고 qa_issue 상태를 재분류한다.',
+          source_pointer: 'codex_product_review.json:screens:loading:blocked_despite_pass',
+        });
+      });
+      expectFail(dir, 'derived status is not pass');
+    },
+  ],
+  [
     'unchecked product review fails',
     async (dir) => {
       await makeStrictPassFixture(dir);
@@ -220,6 +288,16 @@ const tests = [
         baseStatus.reviewed_original = false;
       });
       expectFail(dir, 'high-risk screen must be reviewed_original=true');
+    },
+  ],
+  [
+    'pass with commercial polish below four fails derived gate',
+    async (dir) => {
+      await makeStrictPassFixture(dir);
+      await editReview(dir, (review) => {
+        review.screens[0].scores.commercial_polish = 3;
+      });
+      expectFail(dir, 'derived status is not pass');
     },
   ],
   [
@@ -883,6 +961,16 @@ const tests = [
     async (dir) => {
       await makeFastFixture(dir);
       expectFail(dir, 'QA_MODE=fast cannot declare final PASS', { mode: 'fast', expect: 'pass' });
+    },
+  ],
+  [
+    'fast report containing final PASS text fails',
+    async (dir) => {
+      await makeFastFixture(dir);
+      const htmlPath = join(dir, 'report.html');
+      const html = await readFile(htmlPath, 'utf8');
+      await writeFile(htmlPath, html.replace('최종 상태: 부분 검수 완료', '최종 상태: PASS'));
+      expectFail(dir, 'Fast QA report must not contain final PASS text', { mode: 'fast', expect: 'not_pass' });
     },
   ],
   [

@@ -463,7 +463,7 @@ async function validateProductReview() {
       expectedStatus: reviewStatusToIssueStatus(result.status),
     });
     validateCapturedScreenHasMatrixJudgement(screen, result);
-    if (finalPassAllowed && result.status === 'pass') {
+    if (result.status === 'pass') {
       validateConcreteProductEvidence(screen, result);
     }
     const contract = validateScreenContract(screen, result);
@@ -493,6 +493,10 @@ async function validateProductReview() {
     const severe = (result.findings ?? []).filter(
       (finding) => severityRank(finding.severity) >= severityRank('P2'),
     );
+    const derivedBlockers = productDerivedPassBlockers(screen, result, contract, severe);
+    if (result.status === 'pass' && derivedBlockers.length > 0) {
+      errors.push(`codex product review ${screen.id} derived status is not pass: ${derivedBlockers.join(', ')}`);
+    }
     if (finalPassAllowed && contract.failures.length > 0) {
       errors.push(`product contract has failing check(s) for ${screen.id}: ${contract.failures.length}`);
     }
@@ -607,6 +611,10 @@ async function validatePlaythroughReview() {
     const severe = (result.findings ?? []).filter(
       (finding) => severityRank(finding.severity) >= severityRank('P2'),
     );
+    const derivedBlockers = playthroughDerivedPassBlockers(flow.id, result, contract, severe);
+    if (result.verdict === 'pass' && derivedBlockers.length > 0) {
+      errors.push(`codex playthrough review ${flow.id} derived status is not pass: ${derivedBlockers.join(', ')}`);
+    }
     if (finalPassAllowed && contract.failures.length > 0) {
       errors.push(`playthrough contract has failing check(s) for ${flow.id}: ${contract.failures.length}`);
     }
@@ -1048,6 +1056,22 @@ async function validateHtmlReport() {
     return;
   }
   const html = await readFile(htmlReportPath, 'utf8');
+  const payload = extractReportPayload(html);
+  if (!Number.isFinite(payload.pass_blocker_count)) {
+    errors.push('report.html payload missing pass_blocker_count.');
+  }
+  if (!Array.isArray(payload.pass_blockers)) {
+    errors.push('report.html payload missing pass_blockers array.');
+  }
+  if (payload.final_status === 'PASS' && payload.pass_blocker_count !== 0) {
+    errors.push(`report.html declares PASS with ${payload.pass_blocker_count} pass blocker(s).`);
+  }
+  if (payload.final_status === 'PASS' && expectedFinalStatus !== 'pass') {
+    errors.push('report.html declares final PASS while validation expects not_pass.');
+  }
+  if (payload.final_status !== 'PASS' && !html.includes('PASS 차단 항목')) {
+    errors.push('report.html must expose PASS blocker section when final status is not PASS.');
+  }
   const requiredTexts = [
     'Dragonout QA Report',
     '자동 검사 게이트',
@@ -1056,7 +1080,7 @@ async function validateHtmlReport() {
     '수정 큐',
   ];
   if (finalPassAllowed) {
-    requiredTexts.push('최종 상태: PASS', 'Codex visual/product review completed', 'Codex playthrough review completed', 'commercial_ready');
+    requiredTexts.push('최종 상태: PASS', 'Deterministic gate 기준으로 PASS 차단 항목이 0건', 'commercial_ready');
   } else if (qaMode === 'fast') {
     requiredTexts.push('부분 검수 완료');
     if (html.includes('최종 상태: PASS')) {
@@ -1123,6 +1147,29 @@ async function validateHtmlReport() {
     }
   }
   await validateCalibrationSetupHtml();
+}
+
+function extractReportPayload(html) {
+  const match = html.match(/<script id="qa-report-payload" type="application\/json">([\s\S]*?)<\/script>/);
+  if (!match) {
+    errors.push('report.html missing qa-report-payload script.');
+    return {};
+  }
+  try {
+    return JSON.parse(decodeHtmlEntities(match[1]));
+  } catch (error) {
+    errors.push(`report.html payload is not valid JSON: ${error.message}`);
+    return {};
+  }
+}
+
+function decodeHtmlEntities(value) {
+  return String(value)
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&');
 }
 
 async function validateMotionArtifacts() {
@@ -1320,6 +1367,44 @@ function validateReviewIssues(label, rawIssues, options) {
       errors.push(`${label} qa_issue ${issue.id} target_id mismatch: ${issue.target_id}`);
     }
   }
+}
+
+function productDerivedPassBlockers(screen, result, contract, severeFindings) {
+  const blockers = [];
+  if (result.ship_readiness !== 'commercial_ready') blockers.push(`ship_readiness=${result.ship_readiness ?? 'missing'}`);
+  for (const key of matrix.qualityStandard?.scoreKeys ?? scoreKeys()) {
+    const score = result.scores?.[key];
+    if (!Number.isFinite(score) || score < 4) blockers.push(`${key}<4`);
+  }
+  if (contract.failures.length > 0) blockers.push(`contract_fail=${contract.failures.length}`);
+  if (contract.notObserved.length > 0) blockers.push(`contract_blocked=${contract.notObserved.length}`);
+  if (severeFindings.length > 0) blockers.push(`p2plus_findings=${severeFindings.length}`);
+  const issueStatuses = new Set((result.qa_issues ?? []).map((issue) => normalizeQaIssue(issue).status));
+  for (const status of ['FAIL', 'BLOCKED', 'RULE_INVALID', 'SKIP']) {
+    if (issueStatuses.has(status)) blockers.push(`qa_issue_${status}`);
+  }
+  if ((screen.mustReviewAtOriginalSize || userRegressionScreenIds.has(screen.id)) && result.reviewed_original !== true) {
+    blockers.push('reviewed_original_missing');
+  }
+  return blockers;
+}
+
+function playthroughDerivedPassBlockers(flowId, result, contract, severeFindings) {
+  const blockers = [];
+  for (const key of playthroughMatrix.requiredScoreKeys ?? []) {
+    const score = result.scenario_scores?.[key];
+    if (!Number.isFinite(score) || score < 4) blockers.push(`${key}<4`);
+  }
+  if (!Array.isArray(result.transcript) || result.transcript.length === 0) blockers.push('transcript_missing');
+  if (isBlank(result.review_note)) blockers.push('review_note_missing');
+  if (contract.failures.length > 0) blockers.push(`contract_fail=${contract.failures.length}`);
+  if (contract.notObserved.length > 0) blockers.push(`contract_blocked=${contract.notObserved.length}`);
+  if (severeFindings.length > 0) blockers.push(`p2plus_findings=${severeFindings.length}`);
+  const issueStatuses = new Set((result.qa_issues ?? []).map((issue) => normalizeQaIssue(issue).status));
+  for (const status of ['FAIL', 'BLOCKED', 'RULE_INVALID', 'SKIP']) {
+    if (issueStatuses.has(status)) blockers.push(`qa_issue_${status}`);
+  }
+  return blockers;
 }
 
 function validateQaIssue(label, issue, options = {}) {

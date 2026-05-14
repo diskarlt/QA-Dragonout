@@ -162,24 +162,10 @@ const qaQueueCounts = {
 };
 const automatedGate = assessAutomatedGate();
 const codexGate = assessCodexGate();
+const passBlockers = collectPassBlockers();
 const finalPassEligible =
   qaMode === 'full' &&
-  automatedGate.status === 'pass' &&
-  codexGate.status === 'pass' &&
-  counts.fail === 0 &&
-  counts.blocked === 0 &&
-  counts.rule_invalid === 0 &&
-  counts.skip === 0 &&
-  qaQueueCounts.blocked === 0 &&
-  qaQueueCounts.rule_invalid === 0 &&
-  capture.captured_count === matrix.screens.length &&
-  lints.summary?.fail === 0 &&
-  review.status === 'pass' &&
-  playthroughReview.status === 'pass' &&
-  devQueueItems.length === 0 &&
-  qaQueueItems.length === 0 &&
-  regressionLockScreens.every((screen) => screen.status === 'PASS') &&
-  flowRows.every((row) => row.finalVerdict === 'PASS');
+  passBlockers.length === 0;
 const finalStatus = finalPassEligible ? 'PASS' : qaMode === 'fast' ? '부분 검수 완료' : 'QA 미통과';
 const validationExpectedStatus = finalPassEligible ? 'pass' : 'not_pass';
 
@@ -190,6 +176,8 @@ const payload = {
   screen_counts: counts,
   severity_counts: severityCounts,
   contract_counts: contractCounts,
+  pass_blockers: passBlockers,
+  pass_blocker_count: passBlockers.length,
   high_risk_count: highRiskRows.length,
   narrative_risk_count: narrativeRiskRows.length,
   automated_gate: automatedGate,
@@ -388,21 +376,22 @@ function renderBody() {
       ${summaryCard('최종 상태', finalStatus, finalStatus === 'PASS' ? 'pass' : finalStatus === '부분 검수 완료' ? 'low' : 'fail')}
       ${summaryCard('자동 게이트', automatedGate.label, automatedGate.tone)}
       ${summaryCard('Codex 검수', codexGate.label, codexGate.tone)}
+      ${summaryCard('PASS 차단', String(passBlockers.length), passBlockers.length === 0 ? 'pass' : 'fail')}
       ${summaryCard('QA 모드', qaMode, qaMode === 'full' ? 'pass' : 'low')}
       ${summaryCard('캡처 수', `${capture.captured_count}/${capture.expected_count}`, capture.captured_count === capture.expected_count ? 'pass' : 'fail')}
       ${summaryCard('FAIL 화면', String(counts.fail), counts.fail === 0 ? 'pass' : 'fail')}
-      ${summaryCard('BLOCKED 화면', String(counts.blocked), counts.blocked === 0 ? 'pass' : 'low')}
-      ${summaryCard('RULE_INVALID 화면', String(counts.rule_invalid), counts.rule_invalid === 0 ? 'pass' : 'low')}
+      ${summaryCard('BLOCKED 화면', String(counts.blocked), counts.blocked === 0 ? 'pass' : 'fail')}
+      ${summaryCard('RULE_INVALID 화면', String(counts.rule_invalid), counts.rule_invalid === 0 ? 'pass' : 'fail')}
       ${summaryCard('LOW_CONFIDENCE', '0', 'pass')}
       ${summaryCard('P0/P1/P2', `${severityCounts.P0}/${severityCounts.P1}/${severityCounts.P2}`, severityCounts.P0 + severityCounts.P1 + severityCounts.P2 === 0 ? 'pass' : 'fail')}
       ${summaryCard('FAIL 판정 항목', String(contractCounts.fail), contractCounts.fail === 0 ? 'pass' : 'fail')}
-      ${summaryCard('BLOCKED 판정 항목', String(contractCounts.blocked), contractCounts.blocked === 0 ? 'pass' : 'low')}
-      ${summaryCard('Playthrough', playthroughReview.status ?? 'missing', playthroughReview.status === 'pass' ? 'pass' : 'fail')}
+      ${summaryCard('BLOCKED 판정 항목', String(contractCounts.blocked), contractCounts.blocked === 0 ? 'pass' : 'fail')}
+      ${summaryCard('Playthrough', playthroughReview.status ?? 'missing', flowRows.every((row) => row.finalVerdict === 'PASS') ? 'pass' : 'fail')}
       ${summaryCard('Dev Queue', String(devQueueItems.length), devQueueItems.length === 0 ? 'pass' : 'fail')}
-      ${summaryCard('QA Queue BLOCKED', String(qaQueueCounts.blocked), qaQueueCounts.blocked === 0 ? 'pass' : 'low')}
-      ${summaryCard('RULE_INVALID', String(qaQueueCounts.rule_invalid), qaQueueCounts.rule_invalid === 0 ? 'pass' : 'low')}
-      ${summaryCard('SKIP', String(qaQueueCounts.skip), qaQueueCounts.skip === 0 ? 'pass' : 'low')}
-      ${summaryCard('Regression Lock', `${regressionLockScreens.filter((screen) => screen.status === 'FAIL').length}/${regressionLockScreens.length}`, regressionLockScreens.some((screen) => screen.status === 'FAIL') ? 'fail' : 'pass')}
+      ${summaryCard('QA Queue BLOCKED', String(qaQueueCounts.blocked), qaQueueCounts.blocked === 0 ? 'pass' : 'fail')}
+      ${summaryCard('RULE_INVALID', String(qaQueueCounts.rule_invalid), qaQueueCounts.rule_invalid === 0 ? 'pass' : 'fail')}
+      ${summaryCard('SKIP', String(qaQueueCounts.skip), qaQueueCounts.skip === 0 ? 'pass' : 'fail')}
+      ${summaryCard('Regression Lock', `${regressionLockScreens.filter((screen) => screen.status !== 'PASS').length}/${regressionLockScreens.length}`, regressionLockScreens.some((screen) => screen.status !== 'PASS') ? 'fail' : 'pass')}
       ${summaryCard('고정 QA 룰', String(fixedRules.length), fixedRules.length > 0 ? 'fail' : 'low')}
       ${summaryCard('룰 finding', String(fixedRuleQueue.length), fixedRuleQueue.length === 0 ? 'pass' : 'fail')}
     </div>
@@ -462,7 +451,8 @@ function renderBody() {
     <section>
       <h2>Commercial Product QA Gate</h2>
       <p><strong>${finalStatus === 'PASS' ? '최종 상태: PASS' : finalStatus === '부분 검수 완료' ? '최종 상태: 부분 검수 완료' : '최종 상태: QA 미통과'}</strong></p>
-      <p>${finalStatus === 'PASS' ? 'Codex visual/product review completed. Codex playthrough review completed. 모든 화면과 플레이 흐름이 commercial_ready입니다.' : `${codexGate.label}. 자동 검사 또는 Codex 제품 검수 단계에서 하나 이상의 화면 또는 흐름이 상업용 제품 QA 기준을 통과하지 못했거나 부분 검수입니다.`}</p>
+      <p>${finalStatus === 'PASS' ? 'Deterministic gate 기준으로 PASS 차단 항목이 0건이며 모든 화면과 플레이 흐름이 commercial_ready입니다.' : `${codexGate.label}. PASS 차단 ${passBlockers.length}건이 남아 있어 최종 PASS를 선언하지 않습니다.`}</p>
+      ${renderPassBlockers()}
     </section>
 
     <section>
@@ -485,6 +475,16 @@ function renderBody() {
       </div>
     </section>
   </main>`;
+}
+
+function renderPassBlockers() {
+  if (passBlockers.length === 0) {
+    return '<p class="pass">PASS 차단 항목 없음</p>';
+  }
+  return `<details open><summary>PASS 차단 항목 (${passBlockers.length})</summary><ul>${passBlockers
+    .slice(0, 80)
+    .map((item) => `<li><strong>${escapeHtml(item.category)}</strong>: ${escapeHtml(item.message)}</li>`)
+    .join('')}</ul></details>`;
 }
 
 function renderScreenRow(row) {
@@ -1819,20 +1819,39 @@ function assessCodexGate() {
       message: '자동 검사 게이트가 통과되지 않아 Codex 제품 검수 대상으로 승격하지 않습니다.',
     };
   }
-  if (review.status === 'pass' && playthroughReview.status === 'pass') {
+  const screenFailures = screenRows.filter((row) => row.finalVerdict === 'FAIL');
+  const flowFailures = flowRows.filter((row) => row.finalVerdict === 'FAIL');
+  const screenBlocks = screenRows.filter((row) => ['BLOCKED', 'RULE_INVALID', 'SKIP'].includes(row.finalVerdict));
+  const flowBlocks = flowRows.filter((row) => ['BLOCKED', 'RULE_INVALID', 'SKIP'].includes(row.finalVerdict));
+  if (
+    review.status === 'pass' &&
+    playthroughReview.status === 'pass' &&
+    screenFailures.length === 0 &&
+    flowFailures.length === 0 &&
+    screenBlocks.length === 0 &&
+    flowBlocks.length === 0
+  ) {
     return {
       status: 'pass',
       label: 'Codex 제품 검수 PASS',
       tone: 'pass',
-      message: 'Codex product/playthrough review가 모두 통과했습니다.',
+      message: 'Codex product/playthrough review의 derived gate가 모두 통과했습니다.',
     };
   }
-  if (review.status === 'fail' || playthroughReview.status === 'fail') {
+  if (review.status === 'fail' || playthroughReview.status === 'fail' || screenFailures.length > 0 || flowFailures.length > 0) {
     return {
       status: 'fail',
       label: 'Codex 제품 검수 FAIL',
       tone: 'fail',
-      message: 'Codex product/playthrough review가 실패 상태입니다. 수정 큐를 먼저 처리해야 합니다.',
+      message: `Codex derived gate가 FAIL 화면 ${screenFailures.length}건, FAIL 흐름 ${flowFailures.length}건을 검출했습니다. 수정 큐를 먼저 처리해야 합니다.`,
+    };
+  }
+  if (screenBlocks.length > 0 || flowBlocks.length > 0) {
+    return {
+      status: 'blocked',
+      label: 'Codex 제품 검수 BLOCKED',
+      tone: 'fail',
+      message: `Codex derived gate가 BLOCKED/RULE_INVALID/SKIP 화면 ${screenBlocks.length}건, 흐름 ${flowBlocks.length}건을 검출했습니다. 증거 보강이나 룰 재작성이 필요합니다.`,
     };
   }
   if (String(review.status).startsWith('calibration') || String(playthroughReview.status).startsWith('calibration')) {
@@ -1849,6 +1868,36 @@ function assessCodexGate() {
     tone: 'low',
     message: '자동 검사는 통과했으며 Codex product/playthrough review 작성 또는 갱신이 필요합니다.',
   };
+}
+
+function collectPassBlockers() {
+  const blockers = [];
+  const push = (category, message) => blockers.push({ category, message });
+  if (qaMode !== 'full') push('mode', 'Fast QA는 최종 PASS를 선언할 수 없습니다.');
+  if (automatedGate.status !== 'pass') push('automated_gate', automatedGate.message);
+  if (codexGate.status !== 'pass') push('codex_gate', codexGate.message);
+  if (capture.captured_count !== matrix.screens.length || capture.expected_count !== matrix.screens.length) {
+    push('capture', `캡처 수가 full matrix와 일치하지 않습니다: ${capture.captured_count}/${capture.expected_count}`);
+  }
+  if ((lints.summary?.fail ?? 0) > 0) push('polish_lints', `polish lint FAIL ${lints.summary.fail}건`);
+  for (const row of screenRows) {
+    if (row.finalVerdict !== 'PASS') push('screen', `${row.screen.id}=${row.finalVerdict}`);
+    if (row.contract.failures.length > 0) push('screen_contract_fail', `${row.screen.id} 계약 FAIL ${row.contract.failures.length}건`);
+    if (row.contract.notObserved.length > 0) push('screen_contract_blocked', `${row.screen.id} 계약 BLOCKED ${row.contract.notObserved.length}건`);
+    if (row.severeFindings.length > 0) push('screen_finding', `${row.screen.id} P2+ finding ${row.severeFindings.length}건`);
+  }
+  for (const row of flowRows) {
+    if (row.finalVerdict !== 'PASS') push('playthrough', `${row.flow.id}=${row.finalVerdict}`);
+    if (row.contract.failures.length > 0) push('playthrough_contract_fail', `${row.flow.id} 계약 FAIL ${row.contract.failures.length}건`);
+    if (row.contract.notObserved.length > 0) push('playthrough_contract_blocked', `${row.flow.id} 계약 BLOCKED ${row.contract.notObserved.length}건`);
+    if (row.severeFindings.length > 0) push('playthrough_finding', `${row.flow.id} P2+ finding ${row.severeFindings.length}건`);
+  }
+  if (devQueueItems.length > 0) push('dev_queue', `개발 수정 큐 ${devQueueItems.length}건`);
+  if (qaQueueItems.length > 0) push('qa_queue', `QA Queue ${qaQueueItems.length}건`);
+  for (const screen of regressionLockScreens) {
+    if (screen.status !== 'PASS') push('regression_lock', `${screen.id}=${screen.status}`);
+  }
+  return blockers;
 }
 
 function userRegressionQueue() {

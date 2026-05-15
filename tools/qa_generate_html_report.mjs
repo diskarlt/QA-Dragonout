@@ -30,6 +30,8 @@ const screenArtifactsPath =
   process.env.QA_SCREEN_ARTIFACTS_PATH ?? join(reportDir, 'screen_artifacts.json');
 const playthroughTracePath =
   process.env.QA_PLAYTHROUGH_TRACE_PATH ?? join(reportDir, 'playthrough_trace.json');
+const scenarioArtifactsPath =
+  process.env.QA_SCENARIO_ARTIFACTS_PATH ?? join(reportDir, 'scenario_artifacts.json');
 const templatePath = process.env.QA_REPORT_TEMPLATE_PATH ?? 'tools/qa_report_template.html';
 const outputPath = process.env.QA_HTML_REPORT_PATH ?? join(reportDir, 'report.html');
 const markdownOutputPath = process.env.QA_MARKDOWN_REPORT_PATH ?? join(reportDir, 'report.md');
@@ -105,6 +107,7 @@ const artifactByScreenId = new Map(
 );
 const playthroughTraceDoc = await readJsonOrDefault(playthroughTracePath, { flows: [] });
 const traceByFlowId = new Map((playthroughTraceDoc.flows ?? []).map(f => [f.flow_id, f]));
+const scenarioArtifactsDoc = await readJsonOrDefault(scenarioArtifactsPath, { flows: [] });
 
 const requiredScoreKeys = matrix.qualityStandard?.scoreKeys ?? scoreKeys();
 const lintById = new Map((lints.results ?? []).map((result) => [result.id, result]));
@@ -196,6 +199,7 @@ const payload = {
     rule_count: fixedRules.length,
     finding_count: fixedRuleQueue.length,
   },
+  scenario_artifacts: scenarioArtifactSummary(),
   dev_queue: {
     source: devQueuePath,
     item_count: devQueueItems.length,
@@ -420,6 +424,8 @@ function renderBody() {
       ${renderLiveEvents(liveStatus.events ?? [])}
     </section>
 
+    ${renderScenarioArtifactsSection()}
+
     <section>
       <h2>수정 큐</h2>
       <p class="section-note">수정 큐는 <code>dev_queue.json</code>의 FAIL 티켓만 표시합니다. 각 항목은 검출 근거, 수정 방향, 통과 기준, source pointer를 가져야 합니다.</p>
@@ -589,6 +595,93 @@ function renderFlowTraceSummary(flow) {
       ${missing.length > 0 ? `<div class="missing-evidence"><b>Missing evidence:</b><ul>${missing.map(m => `<li class="fail">${escapeHtml(m)}</li>`).join('')}</ul></div>` : ''}
     </div>
   </div>`;
+}
+
+function renderScenarioArtifactsSection() {
+  const flows = scenarioArtifactsDoc.flows ?? [];
+  if (flows.length === 0) return '';
+  const summary = scenarioArtifactSummary();
+  return `<section>
+    <h2>Scenario Flow QA Artifacts</h2>
+    <p class="section-note">Full QA와 별개로 흐름/화면 재현을 위해 남긴 artifact입니다. 같은 단계가 여러 기기 크기로 캡처되며, 대사 후보와 이미지 표시 근거를 함께 기록합니다.</p>
+    <div class="summary">
+      ${summaryCard('Scenario flows', String(summary.flow_count), summary.flow_count > 0 ? 'pass' : 'low')}
+      ${summaryCard('Device profiles', String(summary.device_count), summary.device_count > 1 ? 'pass' : 'low')}
+      ${summaryCard('Steps', `${summary.captured_step_count}/${summary.expected_step_count}`, summary.failed_step_count === 0 ? 'pass' : 'fail')}
+      ${summaryCard('Broken images', String(summary.broken_image_count), summary.broken_image_count === 0 ? 'pass' : 'fail')}
+    </div>
+    <div class="qa-matrix-grid">${flows.map(renderScenarioFlow).join('\n')}</div>
+  </section>`;
+}
+
+function renderScenarioFlow(flow) {
+  const devices = flow.devices ?? [];
+  const deviceLabels = devices
+    .map((device) => `${device.device?.id ?? 'device'} ${device.viewport?.width ?? '-'}x${device.viewport?.height ?? '-'}`)
+    .join(', ');
+  return `<article class="qa-card ${verdictTone(flow.status === 'failed' ? 'FAIL' : flow.status === 'partial' ? 'BLOCKED' : 'PASS')}">
+    <div class="qa-flow-thumb">Scenario<br>${escapeHtml(flow.flow_id)}</div>
+    <div class="qa-card-main">
+      <div class="qa-card-head">
+        <div>
+          <h3>${escapeHtml(flow.title ?? flow.flow_id)}</h3>
+          <p class="muted">${escapeHtml(deviceLabels || '기기 profile 없음')}</p>
+        </div>
+        ${badge(flow.status ?? 'unknown')}
+      </div>
+      ${devices.map((device) => renderScenarioDevice(flow, device)).join('\n')}
+    </div>
+  </article>`;
+}
+
+function renderScenarioDevice(flow, device) {
+  const steps = device.steps ?? [];
+  const viewport = device.viewport ?? device.device ?? {};
+  return `<div class="qa-card-section">
+    <h4>${escapeHtml(device.device?.label ?? device.device?.id ?? 'device')} · ${escapeHtml(viewport.width ?? '-')}x${escapeHtml(viewport.height ?? '-')}</h4>
+    <div class="scenario-step-grid">${steps.map((step) => renderScenarioStep(flow, step)).join('\n')}</div>
+  </div>`;
+}
+
+function renderScenarioStep(_flow, step) {
+  const screenshot = scenarioScreenshotHref(step);
+  const dialogue = (step.dialogueLines ?? step.visibleText ?? []).slice(0, 5);
+  const ctas = (step.primaryCtas ?? []).slice(0, 5).map((cta) => `${cta.label}${cta.enabled === false ? ' (비활성)' : ''}`);
+  const imageEvidence = step.imageEvidence ?? {};
+  const broken = Number(imageEvidence.brokenImageCount ?? 0);
+  return `<div class="scenario-step-card ${broken > 0 || step.status === 'failed' ? 'fail' : step.status === 'partial' ? 'low' : 'pass'}">
+    ${screenshot ? `<a href="${escapeHtml(screenshot)}" target="_blank"><img class="thumb" src="${escapeHtml(screenshot)}" alt="${escapeHtml(step.screen)} ${escapeHtml(step.device)}"></a>` : '<div class="qa-flow-thumb">No screenshot</div>'}
+    <div>
+      <b>${escapeHtml(step.step_index + 1)}. ${escapeHtml(step.stage ?? step.screen)}</b>
+      <div class="muted">${escapeHtml(step.screen)} · ${escapeHtml(step.device)} · ${escapeHtml(step.status)}</div>
+      <div><b>대사:</b> ${dialogue.length > 0 ? escapeHtml(dialogue.join(' / ')) : '<span class="muted">없음</span>'}</div>
+      <div><b>CTA:</b> ${ctas.length > 0 ? escapeHtml(ctas.join(', ')) : '<span class="muted">없음</span>'}</div>
+      <div><b>Image:</b> img ${escapeHtml(imageEvidence.imageNodeCount ?? 0)}, broken ${escapeHtml(imageEvidence.brokenImageCount ?? 0)}, subject ${escapeHtml(imageEvidence.visualSubjectCount ?? 0)}, guardian ${escapeHtml(imageEvidence.guardianCount ?? 0)}</div>
+      ${(step.missingEvidence ?? []).length > 0 ? `<div class="missing-evidence">${renderList(step.missingEvidence)}</div>` : ''}
+    </div>
+  </div>`;
+}
+
+function scenarioScreenshotHref(step) {
+  if (!step?.screenshot) return null;
+  return String(step.screenshot).replace(/^\/+/, '');
+}
+
+function scenarioArtifactSummary() {
+  const flows = scenarioArtifactsDoc.flows ?? [];
+  const devices = flows.flatMap((flow) => flow.devices ?? []);
+  const steps = devices.flatMap((device) => device.steps ?? []);
+  const deviceIds = new Set(devices.map((device) => device.device?.id).filter(Boolean));
+  return {
+    source: scenarioArtifactsPath,
+    flow_count: flows.length,
+    device_count: deviceIds.size,
+    expected_step_count: scenarioArtifactsDoc.expected_step_count ?? steps.length,
+    captured_step_count: scenarioArtifactsDoc.captured_step_count ?? steps.filter((step) => ['captured', 'partial'].includes(step.status)).length,
+    failed_step_count: steps.filter((step) => step.status === 'failed').length,
+    broken_image_count: steps.reduce((sum, step) => sum + Number(step.imageEvidence?.brokenImageCount ?? 0), 0),
+    generated_at: scenarioArtifactsDoc.generated_at ?? null,
+  };
 }
 
 function renderScores(scores, lowestScore, keys) {

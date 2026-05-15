@@ -18,6 +18,7 @@ console.log('qa_dashboard_client tests passed');
 async function testCanonicalDelegation() {
   const port = 64881;
   let received = null;
+  let scenarioReceived = null;
   const server = await startServer(port, async (request, response) => {
     if (request.method === 'GET' && request.url === '/api/health') {
       return json(response, 200, {
@@ -31,6 +32,10 @@ async function testCanonicalDelegation() {
     if (request.method === 'POST' && request.url === '/api/run/fast') {
       received = await readJson(request);
       return json(response, 202, { job: { id: 'qa-test', mode: 'fast' } });
+    }
+    if (request.method === 'POST' && request.url === '/api/run/scenario') {
+      scenarioReceived = await readJson(request);
+      return json(response, 202, { job: { id: 'qa-scenario', mode: 'scenario' } });
     }
     if (request.method === 'GET' && request.url === '/api/status') {
       return json(response, 200, {
@@ -48,6 +53,26 @@ async function testCanonicalDelegation() {
     assert(result.runnerRoot === canonicalRunnerRoot, 'client records canonical runner root');
     assert(received.targetWorktree === '/Users/euna/Developer/Dragonout-task-demo', 'client sends target worktree');
     assert(received.changedFiles === 'lib/main.dart', 'client sends changed files');
+
+    const scenario = await runClient(port, [
+      'scenario',
+      '--target',
+      '/Users/euna/Developer/Dragonout-task-demo',
+      '--flow',
+      'first_report_flow',
+      '--screen',
+      'result',
+      '--device-profile',
+      'mobile-sm',
+      '--viewport',
+      'tablet:768x1024',
+    ]);
+    const scenarioResult = JSON.parse(scenario.stdout);
+    assert(scenarioResult.delegated === true, 'client delegates scenario QA to central runner');
+    assert(scenarioReceived.targetWorktree === '/Users/euna/Developer/Dragonout-task-demo', 'scenario sends target worktree');
+    assert(scenarioReceived.flows === 'first_report_flow', 'scenario sends flow filters');
+    assert(scenarioReceived.screens === 'result', 'scenario sends screen filters');
+    assert(scenarioReceived.deviceProfiles === 'mobile-sm\ntablet:768x1024', 'scenario sends device profiles');
   } finally {
     await closeServer(server);
   }

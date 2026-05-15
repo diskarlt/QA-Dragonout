@@ -16,6 +16,7 @@ const event = {
   message: args.message ?? previous.message ?? '',
 };
 const next = {
+  ...previous,
   status: event.status,
   phase: event.phase,
   message: event.message,

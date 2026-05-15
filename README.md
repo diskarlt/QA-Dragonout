@@ -50,10 +50,28 @@ node /Users/euna/Developer/QA-Dragonout/tools/qa_dashboard_client.mjs fast \
 node /Users/euna/Developer/QA-Dragonout/tools/qa_dashboard_client.mjs full \
   --target "$PWD"
 
+# Scenario QA (흐름/화면 재현용, 여러 기기 크기 screenshot)
+node /Users/euna/Developer/QA-Dragonout/tools/qa_dashboard_client.mjs scenario \
+  --target "$PWD" \
+  --flow first_report_flow \
+  --device-profile mobile-sm \
+  --device-profile mobile-md \
+  --device-profile mobile-lg \
+  --device-profile tablet
+
+# 특정 화면만 재현 스캔
+node /Users/euna/Developer/QA-Dragonout/tools/qa_dashboard_client.mjs scenario \
+  --target "$PWD" --screen result --viewport tablet:768x1024
+
 # 보고서만 재생성
 node /Users/euna/Developer/QA-Dragonout/tools/qa_dashboard_client.mjs refresh \
   --target "$PWD"
 ```
+
+Scenario QA 산출물은 `reports/current/scenario_artifacts.json`와
+`reports/current/scenario_artifacts/<flow>/<device>/` 아래에 저장된다. 각 step은
+화면별 screenshot, 대사 후보, CTA, 이미지/visual subject 표시 근거를 함께 남기며,
+기존 Full QA screenshot/report와 별도로 누적 검토할 수 있다.
 
 ## 관련 문서
 

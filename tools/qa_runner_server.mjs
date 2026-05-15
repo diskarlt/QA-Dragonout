@@ -87,6 +87,9 @@ async function route(request, response) {
   if (request.method === 'POST' && url.pathname === '/api/run/full') {
     return startJobFromRequest(request, response, 'full');
   }
+  if (request.method === 'POST' && url.pathname === '/api/run/scenario') {
+    return startJobFromRequest(request, response, 'scenario');
+  }
   if (request.method === 'POST' && url.pathname === '/api/refresh-report') {
     return startJobFromRequest(request, response, 'refresh');
   }
@@ -95,6 +98,9 @@ async function route(request, response) {
   }
   if (request.method === 'GET' && url.pathname.startsWith('/artifacts/')) {
     return serveReportRelative(response, currentReportDir, url.pathname, '/artifacts/');
+  }
+  if (request.method === 'GET' && url.pathname.startsWith('/scenario_artifacts/')) {
+    return serveReportRelative(response, currentReportDir, url.pathname, '/scenario_artifacts/');
   }
   if (request.method === 'GET' && url.pathname.startsWith('/report-assets/')) {
     return serveReportRelative(response, currentReportDir, url.pathname, '/report-assets/');
@@ -131,6 +137,7 @@ async function startJobFromRequest(request, response, mode) {
   currentReportDir = jobReportDir;
   currentScreenshotDir = jobScreenshotDir;
   const changedFiles = splitLines(body.changedFiles ?? '');
+  const scenario = mode === 'scenario' ? normalizeScenarioOptions(body) : null;
   activeJob = {
     id: `qa-${++jobCounter}`,
     mode,
@@ -138,12 +145,13 @@ async function startJobFromRequest(request, response, mode) {
     reportDir: jobReportDir,
     screenshotDir: jobScreenshotDir,
     changedFiles,
+    scenario,
     status: 'queued',
     phase: 'queued',
     message: '대기 중',
     startedAt: new Date().toISOString(),
     current: 0,
-    total: mode === 'refresh' ? 3 : mode === 'fast' ? 7 : 10,
+    total: mode === 'refresh' ? 3 : mode === 'scenario' ? 5 : mode === 'fast' ? 7 : 10,
     events: [],
     children: [],
     cancelled: false,
@@ -169,6 +177,10 @@ async function runJob(job) {
       await refreshReport(job, 'Report만 갱신');
       await markJob(job, 'complete', 'complete', 'Report 갱신 완료', job.total, job.total);
       activeJob = null;
+      return;
+    }
+    if (job.mode === 'scenario') {
+      await runScenarioJob(job);
       return;
     }
     await resetReportForRun(job);
@@ -241,6 +253,34 @@ async function runJob(job) {
   }
 }
 
+async function runScenarioJob(job) {
+  await resetScenarioArtifactsForRun(job);
+  if (testMode) {
+    await markJob(job, 'running', 'test-mode', '테스트 모드: 시나리오 artifact를 시뮬레이션합니다.', 1, job.total);
+    if (testDelayMs > 0) await sleep(testDelayMs);
+    if (job.cancelled) throw new Error('cancelled');
+    await writeScenarioTestArtifacts(job);
+    job.automatedGate = 'not_applicable';
+    job.codexReview = 'scenario_artifacts';
+    job.finalStatus = 'scenario_complete';
+    job.nextAction = '시나리오 artifact를 확인해 재현 화면, 대사, 기기별 이미지 표시 차이를 검토하세요.';
+    await refreshReport(job, 'Scenario QA report 갱신');
+    await markJob(job, 'complete', 'complete', '테스트 모드 Scenario QA 완료', job.total, job.total);
+    activeJob = null;
+    return;
+  }
+
+  await runProcessStep(job, 'build', 'flutter build web --debug', 'flutter', ['build', 'web', '--debug'], { cwd: job.targetWorktree });
+  await runScenarioCapturePipeline(job);
+  job.automatedGate = 'not_applicable';
+  job.codexReview = 'scenario_artifacts';
+  job.finalStatus = 'scenario_complete';
+  job.nextAction = '시나리오 artifact를 확인해 재현 화면, 대사, 기기별 이미지 표시 차이를 검토하세요.';
+  await refreshReport(job, 'Scenario QA report 생성');
+  await markJob(job, 'complete', 'complete', 'Scenario QA 완료', job.total, job.total);
+  activeJob = null;
+}
+
 async function runCapturePipeline(job) {
   await mkdir(job.screenshotDir, { recursive: true });
   const sourceHash = await sourceHashForJob(job);
@@ -280,6 +320,40 @@ async function runCapturePipeline(job) {
         QA_POLISH_LINTS_PATH: join(job.reportDir, 'polish_lints.json'),
         QA_PRODUCT_REVIEW_PATH: join(job.reportDir, 'codex_product_review.json'),
         QA_PLAYTHROUGH_REVIEW_PATH: join(job.reportDir, 'codex_playthrough_review.json'),
+      },
+    });
+  } finally {
+    serverChild?.kill('SIGTERM');
+  }
+}
+
+async function runScenarioCapturePipeline(job) {
+  const scenarioDir = join(job.reportDir, 'scenario_artifacts');
+  await mkdir(scenarioDir, { recursive: true });
+  await runProcessStep(job, 'build', 'target web server 시작', process.execPath, [
+    '-e',
+    serverSnippet(job.targetWorktree),
+  ], {
+    cwd: job.targetWorktree,
+    detached: true,
+    keepChild: true,
+  });
+  const serverChild = job.children.at(-1);
+  try {
+    await sleep(1200);
+    await runProcessStep(job, 'scenario-capture', 'Scenario screenshot capture', process.execPath, ['tools/qa_scenario_capture.mjs'], {
+      cwd: runnerRoot,
+      env: {
+        ...process.env,
+        QA_BASE_URL: 'http://127.0.0.1:64618',
+        QA_REPORT_DIR: job.reportDir,
+        QA_SCENARIO_ARTIFACTS_DIR: scenarioDir,
+        QA_SCENARIO_ARTIFACTS_PATH: join(job.reportDir, 'scenario_artifacts.json'),
+        QA_SCENARIO_FLOW: (job.scenario?.flows ?? []).join(','),
+        QA_SCENARIO_SCREEN: (job.scenario?.screens ?? []).join(','),
+        QA_DEVICE_PROFILES: (job.scenario?.deviceProfiles ?? []).join(','),
+        QA_LIVE_STATUS_PATH: join(job.reportDir, 'qa_live_status.json'),
+        QA_LIVE_REPORT: '1',
       },
     });
   } finally {
@@ -572,6 +646,7 @@ async function markJob(job, status, phase, message, current = job.current, total
     message,
     run_id: job.id,
     mode: job.mode,
+    scenario: job.scenario ?? null,
     targetWorktree: job.targetWorktree,
     reportDir: job.reportDir,
     screenshotDir: job.screenshotDir,
@@ -1304,6 +1379,7 @@ function publicJob(job) {
     staleThresholdMs: staleJobThresholdMs,
     childProgress: job.childProgress ?? null,
     changedFiles: job.changedFiles,
+    scenario: job.scenario ?? null,
     automatedGate: job.automatedGate,
     codexReview: job.codexReview,
     finalStatus: job.finalStatus,
@@ -1418,8 +1494,15 @@ function dashboardHtml() {
       <input id="screenshotDir" value="${escapeHtml(currentScreenshotDir)}">
       <label>Changed files (Fast QA)</label>
       <textarea id="changedFiles" placeholder="lib/widgets/game_widgets.dart&#10;lib/l10n/app_ko.arb"></textarea>
+      <label>Scenario flow</label>
+      <input id="scenarioFlow" placeholder="first_report_flow (비우면 전체 흐름)">
+      <label>Scenario screen</label>
+      <input id="scenarioScreen" placeholder="report_detail_choices 또는 result">
+      <label>Device profiles</label>
+      <input id="deviceProfiles" value="mobile-sm,mobile-md,mobile-lg,tablet">
       <button onclick="runQa('fast')">Fast QA</button>
       <button onclick="runQa('full')">Full QA</button>
+      <button onclick="runScenarioQa()">Scenario QA</button>
       <button onclick="refreshReport()">Report만 갱신</button>
       <button onclick="cancelQa()">Cancel</button>
       <a id="reportButton" href="/report" target="_blank"><button type="button">Report 새 탭</button></a>
@@ -1464,9 +1547,13 @@ function dashboardHtml() {
         reportDir: document.getElementById('reportDir').value,
         screenshotDir: document.getElementById('screenshotDir').value,
         changedFiles: document.getElementById('changedFiles').value,
+        flows: document.getElementById('scenarioFlow').value,
+        screens: document.getElementById('scenarioScreen').value,
+        deviceProfiles: document.getElementById('deviceProfiles').value,
       };
     }
     async function runQa(mode) { await post('/api/run/' + mode, body()); }
+    async function runScenarioQa() { await post('/api/run/scenario', body()); }
     async function refreshReport() { await post('/api/refresh-report', body()); }
     async function cancelQa() { await post('/api/cancel'); }
     function tone(value) {
@@ -1943,6 +2030,14 @@ function splitLines(value) {
   return String(value).split(/[,\n]/).map((line) => line.trim()).filter(Boolean);
 }
 
+function normalizeScenarioOptions(body) {
+  return {
+    flows: splitLines(body.flows ?? body.flow ?? ''),
+    screens: splitLines(body.screens ?? body.screen ?? ''),
+    deviceProfiles: splitLines(body.deviceProfiles ?? body.devices ?? body.viewports ?? ''),
+  };
+}
+
 function trimOutput(value) {
   return String(value ?? '').slice(-4000);
 }
@@ -2014,6 +2109,116 @@ async function resetReportForRun(job) {
   ]) {
     await rm(join(job.reportDir, file), { force: true });
   }
+}
+
+async function resetScenarioArtifactsForRun(job) {
+  await mkdir(job.reportDir, { recursive: true });
+  await rm(join(job.reportDir, 'scenario_artifacts.json'), { force: true });
+  await rm(join(job.reportDir, 'scenario_artifacts'), { recursive: true, force: true });
+}
+
+async function writeScenarioTestArtifacts(job) {
+  const playthroughMatrix = await readJsonIfExists(qaPlaythroughMatrixPath);
+  const matrix = await readJsonIfExists(qaMatrixPath);
+  const firstFlow = (playthroughMatrix?.flows ?? [])[0] ?? {
+    id: 'test_flow',
+    title: '테스트 흐름',
+    steps: ['test_start'],
+  };
+  const flowId = job.scenario?.flows?.[0] ?? firstFlow.id;
+  const screenId = job.scenario?.screens?.[0] ?? firstFlow.steps?.[0] ?? 'test_start';
+  const screen = (matrix?.screens ?? []).find((item) => item.id === screenId) ?? {
+    id: screenId,
+    screen: 'Scenario',
+    state: '시나리오 테스트 단계',
+    qaScreen: screenId,
+  };
+  const deviceProfiles = (job.scenario?.deviceProfiles?.length ?? 0) > 0
+    ? job.scenario.deviceProfiles
+    : ['mobile-sm', 'tablet'];
+  const devices = deviceProfiles.map((id) => ({
+    device: {
+      id,
+      label: id,
+      width: id === 'tablet' ? 768 : 390,
+      height: id === 'tablet' ? 1024 : 844,
+      deviceScaleFactor: 1,
+      mobile: true,
+    },
+    viewport: {
+      width: id === 'tablet' ? 768 : 390,
+      height: id === 'tablet' ? 1024 : 844,
+      deviceScaleFactor: 1,
+      mobile: true,
+    },
+    status: 'captured',
+    steps: [{
+      flow_id: flowId,
+      step_id: `${flowId}.0`,
+      step_index: 0,
+      screen: screen.id,
+      screenName: screen.screen,
+      stage: screen.state,
+      qaScreen: screen.qaScreen,
+      route: `/?qaScreen=${screen.qaScreen}`,
+      device: id,
+      viewport: {
+        width: id === 'tablet' ? 768 : 390,
+        height: id === 'tablet' ? 1024 : 844,
+        deviceScaleFactor: 1,
+        mobile: true,
+      },
+      screenshot: null,
+      status: 'captured',
+      captured_at: new Date().toISOString(),
+      visibleText: ['시나리오 테스트 문구', '대사와 CTA 증거를 기록합니다.'],
+      dialogueLines: ['시나리오 테스트 문구', '대사와 CTA 증거를 기록합니다.'],
+      primaryCtas: [{ label: '다음', enabled: true, action: null, bounds: null }],
+      disabledChoices: [],
+      imageEvidence: {
+        imageNodeCount: 0,
+        brokenImageCount: 0,
+        visualSubjectCount: 1,
+        guardianCount: 0,
+        locationCount: 0,
+        imageNodes: [],
+        visualSubjects: [{ id: 'test_subject', label: '테스트 이미지 subject' }],
+        renderedGuardians: [],
+        renderedLocations: [],
+      },
+      gameState: null,
+      sceneContract: null,
+      missingEvidence: [],
+      source: ['runner_test_fixture'],
+    }],
+  }));
+  await mkdir(join(job.reportDir, 'scenario_artifacts'), { recursive: true });
+  await writeFile(
+    join(job.reportDir, 'scenario_artifacts.json'),
+    `${JSON.stringify({
+      version: 1,
+      generated_at: new Date().toISOString(),
+      started_at: job.startedAt,
+      matrix: qaMatrixPath,
+      playthrough_matrix: qaPlaythroughMatrixPath,
+      filters: {
+        flows: job.scenario?.flows ?? [],
+        screens: job.scenario?.screens ?? [],
+        groups: [],
+      },
+      deviceProfiles: devices.map((entry) => entry.device),
+      expected_step_count: devices.length,
+      captured_step_count: devices.length,
+      flows: [{
+        flow_id: flowId,
+        title: firstFlow.title ?? flowId,
+        fastQaGroup: firstFlow.fastQaGroup ?? null,
+        sourceScreens: [screen.id],
+        status: 'captured',
+        devices,
+      }],
+    }, null, 2)}\n`,
+  );
 }
 
 function escapeHtml(value) {

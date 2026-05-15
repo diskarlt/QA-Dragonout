@@ -72,6 +72,8 @@ try {
   assert(dashboard.includes('qa-judgement-list'), 'dashboard renders a single QA judgement item list inside each card');
   assert(dashboard.includes('QA 판정 요약'), 'dashboard cards show judgement summary outside details');
   assert(dashboard.includes('전체 QA 판정 항목'), 'dashboard folds all judgement items into details');
+  assert(dashboard.includes('Scenario QA'), 'dashboard exposes scenario QA action');
+  assert(dashboard.includes('deviceProfiles'), 'dashboard exposes scenario device profile input');
   assert(dashboard.includes('PASS'), 'dashboard renders fixed PASS contract label');
   assert(dashboard.includes('FAIL'), 'dashboard renders fixed FAIL contract label');
   assert(dashboard.includes('LOW_CONFIDENCE'), 'dashboard renders fixed low-confidence judgement label');
@@ -182,6 +184,20 @@ try {
   assert(reports.reportStat?.size > 0, 'report metadata is available');
   assert(reports.screenshotStats?.count > 0, 'screenshot metadata is available');
   assert(reports.reportStat?.mtime !== status.report.reportStat?.mtime, 'report mtime changes after refresh');
+
+  const scenario = await postJson('/api/run/scenario', {
+    targetWorktree: '/Users/euna/Developer/Dragonout',
+    flows: 'test_flow',
+    deviceProfiles: 'mobile-sm,tablet',
+  });
+  assert(scenario.status === 202, 'scenario QA starts');
+  assert(scenario.json.job.mode === 'scenario', 'scenario QA job mode is recorded');
+  assert(scenario.json.job.scenario.flows.includes('test_flow'), 'scenario filters are recorded');
+  await waitFor(() => getJson('/api/status').then((body) => body.lastJob?.status === 'complete'), 4000);
+  const scenarioReportHtml = await getText('/report');
+  assert(scenarioReportHtml.includes('Scenario Flow QA Artifacts'), 'report renders scenario artifact section');
+  assert(scenarioReportHtml.includes('mobile-sm'), 'report renders scenario mobile profile');
+  assert(scenarioReportHtml.includes('tablet'), 'report renders scenario tablet profile');
 
   console.log('qa_runner_server tests passed');
 } finally {

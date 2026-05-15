@@ -232,6 +232,24 @@
       color: var(--muted);
       padding: 10px;
     }
+    .scenario-step-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 10px;
+    }
+    .scenario-step-card {
+      display: grid;
+      grid-template-columns: 138px minmax(0, 1fr);
+      gap: 10px;
+      border: 1px solid rgba(223, 184, 111, 0.22);
+      border-radius: 6px;
+      background: #160f13;
+      padding: 10px;
+      min-width: 0;
+    }
+    .scenario-step-card.pass { border-color: rgba(127, 210, 155, 0.42); }
+    .scenario-step-card.low { border-color: rgba(229, 181, 103, 0.58); }
+    .scenario-step-card.fail { border-color: rgba(255, 123, 114, 0.62); }
     .qa-judgement-list {
       display: grid;
       gap: 8px;
@@ -260,6 +278,7 @@
       main { padding: 18px 14px 48px; }
       .qa-card { grid-template-columns: 1fr; }
       .qa-card-columns { grid-template-columns: 1fr; }
+      .scenario-step-card { grid-template-columns: 1fr; }
       .thumb { width: min(180px, 100%); }
     }
     button, select, textarea {

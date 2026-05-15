@@ -17,7 +17,7 @@ try {
     await doctor();
   } else if (command === 'status') {
     await status();
-  } else if (command === 'fast' || command === 'full' || command === 'refresh') {
+  } else if (command === 'fast' || command === 'full' || command === 'scenario' || command === 'refresh') {
     await run(command);
   } else if (command === 'open') {
     console.log(dashboardUrl);
@@ -49,7 +49,13 @@ async function run(mode) {
   const targetWorktree = resolve(options.target ?? process.cwd());
   validateTarget(targetWorktree);
   const changedFiles = options.changedFiles ?? '';
-  const response = await postJson(endpoint, { targetWorktree, changedFiles });
+  const response = await postJson(endpoint, {
+    targetWorktree,
+    changedFiles,
+    flows: options.flows ?? '',
+    screens: options.screens ?? '',
+    deviceProfiles: options.deviceProfiles ?? '',
+  });
   console.log(JSON.stringify({
     ok: true,
     delegated: true,
@@ -212,7 +218,7 @@ async function portOwner() {
 }
 
 function parseArgs(rawArgs) {
-  const parsed = { target: null, changedFiles: '' };
+  const parsed = { target: null, changedFiles: '', flows: '', screens: '', deviceProfiles: '' };
   for (let index = 0; index < rawArgs.length; index += 1) {
     const arg = rawArgs[index];
     if (arg === '--target') {
@@ -221,6 +227,20 @@ function parseArgs(rawArgs) {
       parsed.changedFiles = rawArgs[++index] ?? '';
     } else if (arg === '--changed-file') {
       parsed.changedFiles = [parsed.changedFiles, rawArgs[++index] ?? ''].filter(Boolean).join('\n');
+    } else if (arg === '--flow') {
+      parsed.flows = [parsed.flows, rawArgs[++index] ?? ''].filter(Boolean).join('\n');
+    } else if (arg === '--flows') {
+      parsed.flows = rawArgs[++index] ?? '';
+    } else if (arg === '--screen') {
+      parsed.screens = [parsed.screens, rawArgs[++index] ?? ''].filter(Boolean).join('\n');
+    } else if (arg === '--screens') {
+      parsed.screens = rawArgs[++index] ?? '';
+    } else if (arg === '--device-profile') {
+      parsed.deviceProfiles = [parsed.deviceProfiles, rawArgs[++index] ?? ''].filter(Boolean).join('\n');
+    } else if (arg === '--devices' || arg === '--viewports') {
+      parsed.deviceProfiles = rawArgs[++index] ?? '';
+    } else if (arg === '--viewport') {
+      parsed.deviceProfiles = [parsed.deviceProfiles, rawArgs[++index] ?? ''].filter(Boolean).join('\n');
     } else if (arg === '--help' || arg === '-h') {
       usage(0);
     } else {
@@ -238,12 +258,16 @@ function validateTarget(targetWorktree) {
 
 function usage(code) {
   console.log([
-    'Usage: node tools/qa_dashboard_client.mjs <status|doctor|fast|full|refresh|open> [options]',
+    'Usage: node tools/qa_dashboard_client.mjs <status|doctor|fast|full|scenario|refresh|open> [options]',
     '',
     'Options:',
     '  --target <path>            Dragonout target worktree. Default: current working directory.',
     '  --changed-files <text>     Newline/comma separated changed files for Fast QA.',
     '  --changed-file <path>      Add one changed file. Can be repeated.',
+    '  --flow <id>                Scenario QA flow id. Can be repeated.',
+    '  --screen <id>              Scenario QA screen id. Can be repeated.',
+    '  --device-profile <name>    Scenario device profile. Can be repeated.',
+    '  --viewport <WxH|id:WxH>    Scenario custom viewport. Can be repeated.',
   ].join('\n'));
   process.exit(code);
 }

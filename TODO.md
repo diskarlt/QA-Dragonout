@@ -1,7 +1,7 @@
 # QA-Dragonout M3 guardian portrait QA TODO
 
 문서 상태: active  
-최종 갱신: 2026-05-14
+최종 갱신: 2026-05-16
 
 ## 현재 진행 작업
 
@@ -13,6 +13,10 @@
   - 목표: Full QA와 별개로 흐름/화면 단위 재현 스캔을 실행한다.
   - 목표: 각 step별 screenshot, 대사 후보, CTA, 이미지 표시 근거를 artifact로 남긴다.
   - 목표: mobile/tablet 등 여러 viewport profile로 같은 화면을 캡처해 실제 기기 표현 차이를 확인한다.
+- [ ] #21 Dragon Work 전용 화면 캡처를 QA matrix에 추가
+  - 목표: Dragonout main의 최신 Dragon Work QA screen 계약을 canonical runner matrix에 반영한다.
+  - 목표: full QA가 Dragon Work hub, 5종 play, forge result 화면까지 캡처하게 한다.
+  - 목표: Dragon Work 관련 변경 파일은 fast QA에서 `dragon_work` 그룹으로 라우팅한다.
 
 ## 작업 항목
 
@@ -46,3 +50,14 @@
 - [x] runner/client 테스트에 scenario 실행 경로를 추가한다.
 - [ ] Scenario QA를 실제 Dragonout target에 실행해 artifact를 확인한다.
 - [ ] #19 PR을 생성한다.
+
+## #21 작업 항목
+
+- [x] Dragonout main의 최신 `tools/qa_matrix.json`를 QA-Dragonout에 동기화한다.
+- [x] `dragon_work_*` 화면 7개를 matrix에 포함한다.
+- [x] `qa_plan_run.mjs`와 `qa_capture_chrome.mjs`에서 `dragon_work` 변경 파일을 Dragon Work fast QA group으로 라우팅한다.
+- [x] 관련 node test를 실행한다.
+  - 결과: `node tools/qa_plan_run_tests.mjs`, `node tools/qa_validate_report_tests.mjs`, `node tools/qa_runner_server_tests.mjs` PASS.
+- [x] Dragonout target에서 Dragon Work 전용 capture를 실행해 screenshot artifact를 확인한다.
+  - 결과: `fast --changed-file lib/screens/dragon_work_play_screen.dart`가 `dragon_work` 7개 화면을 선택했고 screenshot 7개와 screen artifact를 생성했다.
+- [ ] #21 PR을 생성한다.

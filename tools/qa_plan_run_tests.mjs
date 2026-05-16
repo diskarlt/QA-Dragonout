@@ -4,6 +4,17 @@ import { spawnSync } from 'node:child_process';
 
 const tests = [
   [
+    'dragon work changes select dragon work screens',
+    ['lib/screens/dragon_work_play_screen.dart'],
+    (plan) => {
+      assert(plan.mode === 'fast', 'expected fast mode');
+      assert(plan.screens.includes('dragon_work_hub'), 'expected dragon_work_hub');
+      assert(plan.screens.includes('dragon_work_play_forge'), 'expected forge play screen');
+      assert(plan.screens.includes('dragon_work_result_forge'), 'expected forge result screen');
+      assert(!plan.screens.includes('base_status'), 'dragon work fast plan should stay scoped');
+    },
+  ],
+  [
     'common UI selects high-risk fast groups',
     ['lib/ui/hud.dart'],
     (plan) => {
@@ -36,7 +47,7 @@ const tests = [
     (plan) => {
       assert(plan.mode === 'full', 'expected full mode');
       assert(plan.final_pass_allowed === true, 'full plan allows final pass after strict validation');
-      assert(plan.screens.length === 25, 'full plan must include 25 screens');
+      assert(plan.screens.length === 32, 'full plan must include 32 screens');
     },
   ],
 ];

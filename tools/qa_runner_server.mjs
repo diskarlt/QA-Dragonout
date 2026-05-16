@@ -284,6 +284,7 @@ async function runScenarioJob(job) {
 async function runCapturePipeline(job) {
   await mkdir(job.screenshotDir, { recursive: true });
   const sourceHash = await sourceHashForJob(job);
+  const qaGroup = job.mode === 'fast' ? await qaGroupForJob(job) : '';
   await runProcessStep(job, 'build', 'target web server 시작', process.execPath, [
     '-e',
     serverSnippet(job.targetWorktree),
@@ -300,7 +301,7 @@ async function runCapturePipeline(job) {
       env: {
         ...process.env,
         QA_MODE: job.mode,
-        QA_GROUP: job.mode === 'fast' ? 'base,event,regression' : '',
+        QA_GROUP: qaGroup,
         QA_BASE_URL: 'http://127.0.0.1:64618',
         QA_REPORT_DIR: job.reportDir,
         QA_SCREENSHOT_DIR: job.screenshotDir,
@@ -325,6 +326,15 @@ async function runCapturePipeline(job) {
   } finally {
     serverChild?.kill('SIGTERM');
   }
+}
+
+async function qaGroupForJob(job) {
+  const plan = await readJsonIfExists(join(job.reportDir, 'qa_plan_result.json'));
+  const groups = Array.isArray(plan?.qa_groups)
+    ? plan.qa_groups.map((group) => String(group).trim()).filter(Boolean)
+    : [];
+  if (groups.length > 0) return groups.join(',');
+  return 'base,event,regression';
 }
 
 async function runScenarioCapturePipeline(job) {

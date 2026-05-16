@@ -1,8 +1,8 @@
 # QA-Dragonout M3 guardian portrait 출시 품질 QA SPEC
 
 문서 상태: active  
-최종 갱신: 2026-05-14  
-대상 작업: GitHub issue #15
+최종 갱신: 2026-05-16
+대상 작업: GitHub issue #15, #21
 
 ## 목적
 
@@ -21,6 +21,7 @@ QA-Dragonout이 Dragonout M3 출시 후보 빌드의 guardian portrait와 Live2D
 - runner는 active job의 `lastHeartbeatAt`, `stale`, `childProgress`를 노출해 장시간 실행과 정지 상태를 구분할 수 있어야 한다.
 - capture 중 live status 갱신은 빠른 JSON write로 제한하고, HTML report 생성은 runner의 report generation 단계에서 한 번 수행한다.
 - 하위 프로세스가 timeout을 넘기거나 취소되면 runner가 SIGTERM/SIGKILL 정리와 부분 artifact 저장을 수행한다.
+- Dragon Work 화면은 canonical matrix의 정규 screen으로 관리한다. full QA는 Dragon Work hub, 5종 play 화면, forge result 화면을 포함하고, fast QA는 `dragon_work` 관련 앱/asset 변경을 Dragon Work group으로 라우팅한다.
 
 ## 제외
 
@@ -35,6 +36,7 @@ QA-Dragonout이 Dragonout M3 출시 후보 빌드의 guardian portrait와 Live2D
 - `node tools/qa_validate_report_tests.mjs`가 통과한다.
 - M3 matrix 기준으로 motion artifact 필수 화면이 base_status, event_choice_enabled, event_choice_disabled, result처럼 실제 matrix screen id에만 계산된다.
 - Full QA report가 guardian portrait crop/scale PASS를 semantic fallback이 아니라 numeric metric 근거로 기록한다.
+- Full QA capture expected count는 Dragon Work 화면을 포함한 32개이며, `dragon_work_*` 7개 screen artifact가 생성되어야 한다.
 - Dragonout target Fast QA와 Full QA에서 M3 guardian portrait 기준이 적용되고 FAIL/BLOCKED가 발견되면 수정 큐로 이어진다.
 - `node tools/qa_runner_server_tests.mjs`와 `node tools/qa_dashboard_client_tests.mjs`가 stale active job 진단과 canonical runner 동작을 검증한다.
 - PR에는 issue #15와 실행한 테스트/QA 결과를 연결한다.

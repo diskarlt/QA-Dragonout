@@ -957,6 +957,13 @@ const tests = [
     },
   ],
   [
+    'fast mode ignores fixed rules outside captured screen set',
+    async (dir) => {
+      await makeDragonWorkFastFixture(dir);
+      expectPass(dir, { mode: 'fast', expect: 'not_pass' });
+    },
+  ],
+  [
     'fast mode cannot declare final pass',
     async (dir) => {
       await makeFastFixture(dir);
@@ -1446,6 +1453,18 @@ async function makeFastFixture(dir) {
   const capture = JSON.parse(await readFile(capturePath, 'utf8'));
   capture.mode = 'fast';
   capture.results = capture.results.filter((result) => ['base_status', 'event_choice_enabled'].includes(result.id));
+  capture.expected_count = capture.results.length;
+  capture.captured_count = capture.results.length;
+  await writeJson(capturePath, capture);
+  generateReport(dir, { mode: 'fast' });
+}
+
+async function makeDragonWorkFastFixture(dir) {
+  await makeStrictPassFixture(dir);
+  const capturePath = join(dir, 'capture_result.json');
+  const capture = JSON.parse(await readFile(capturePath, 'utf8'));
+  capture.mode = 'fast';
+  capture.results = capture.results.filter((result) => result.id.startsWith('dragon_work_'));
   capture.expected_count = capture.results.length;
   capture.captured_count = capture.results.length;
   await writeJson(capturePath, capture);

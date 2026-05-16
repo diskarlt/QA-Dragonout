@@ -1,14 +1,14 @@
 # QA-Dragonout M3 guardian portrait 출시 품질 QA PLAN
 
 문서 상태: active  
-최종 갱신: 2026-05-14  
+최종 갱신: 2026-05-16
 대상 스펙: `SPEC.md`
 
 ## 1. 준비
 
 - `/Users/euna/Developer/QA-Dragonout`와 `/Users/euna/Developer/Dragonout`의 git 상태를 확인한다.
-- 작업 브랜치는 `feature/m3-portrait-qa-contract`를 사용한다.
-- 추적 이슈는 GitHub issue #15를 사용한다.
+- #21 작업 브랜치는 `feature/21-dragon-work-captures`를 사용한다.
+- 추적 이슈는 GitHub issue #21을 사용한다.
 
 ## 2. M3 계약 반영
 
@@ -40,3 +40,11 @@
 - QA-Dragonout 변경을 커밋하고 PR을 열어 issue #15와 연결한다.
 - 테스트와 QA가 PASS이면 PR을 merge한다.
 - Dragonout PR의 Full QA 근거와 동일한 M3 기준을 최종 보고에 함께 남긴다.
+
+## 6. Dragon Work 화면 캡처 추가
+
+- Dragonout main의 최신 `tools/qa_matrix.json`를 canonical runner에 동기화해 `dragon_work_*` 화면 7개를 추가한다.
+- `qa_plan_run.mjs`와 `qa_capture_chrome.mjs`에서 `dragon_work` 경로 변경을 `dragon_work` fast QA group으로 선택한다.
+- `node tools/qa_plan_run_tests.mjs`로 fast plan과 full screen count 32개를 확인한다.
+- Dragonout target에서 `dragon_work` group capture를 실행해 전용 screenshot과 screen artifact가 생성되는지 확인한다.
+- #21 PR에는 `Closes #21`과 실행한 node test/QA 결과를 남긴다.

@@ -2,7 +2,54 @@
   "version": 3,
   "viewport": {
     "width": 390,
-    "height": 844
+    "height": 844,
+    "profile": "baseline"
+  },
+  "viewports": [
+    {
+      "id": "compact",
+      "width": 375,
+      "height": 667,
+      "requiredFor": "m3_ux_gate",
+      "purpose": "짧은 모바일 세로 화면에서 한국어 줄바꿈, 텍스트 overflow, 하단 CTA 가림을 확인한다.",
+      "automationStatus": "planned",
+      "unsupportedDisposition": "BLOCKED"
+    },
+    {
+      "id": "baseline",
+      "width": 390,
+      "height": 844,
+      "requiredFor": "m3_ux_gate",
+      "purpose": "기존 25개 필수 화면 전체 matrix와 회귀 기준을 유지한다.",
+      "automationStatus": "supported",
+      "unsupportedDisposition": "BLOCKED"
+    },
+    {
+      "id": "large",
+      "width": 430,
+      "height": 932,
+      "requiredFor": "m3_ux_gate",
+      "purpose": "큰 모바일 세로 화면에서 과도한 여백, 초상 비율, CTA 시선 흐름을 확인한다.",
+      "automationStatus": "planned",
+      "unsupportedDisposition": "BLOCKED"
+    }
+  ],
+  "actualDeviceGate": {
+    "id": "actual_device",
+    "requiredFor": "m3_ux_gate",
+    "minimumDevices": 1,
+    "buildModes": [
+      "Release",
+      "Profile"
+    ],
+    "requiredEvidence": [
+      "실제 기기 모델명",
+      "OS 버전",
+      "빌드 모드",
+      "시작/저장/복구/앱 백그라운드-재개 결과",
+      "첫 보고 흐름 관찰 근거"
+    ],
+    "unsupportedDisposition": "BLOCKED"
   },
   "qualityStandard": {
     "minimumScore": 4,
@@ -51,7 +98,7 @@
         "copy clarity regression"
       ],
       "requiredEvidence": [
-        "fresh 390x844 screenshot",
+        "fresh baseline screenshot",
         "Codex original-size review note",
         "deterministic polish lint result"
       ],
@@ -88,7 +135,7 @@
       "implementedEvidence": [
         {
           "id": "fresh_capture",
-          "label": "390x844 fresh screenshot으로 로딩 화면을 확인한다.",
+          "label": "baseline viewport fresh screenshot으로 로딩 화면을 확인한다.",
           "required": true,
           "passIf": [
             "screen_artifact 또는 polish_lints가 fresh_capture 기준의 기대 상태를 구체 metadata로 충족한다."
@@ -193,7 +240,7 @@
         "hero/CTA hierarchy collapse"
       ],
       "requiredEvidence": [
-        "fresh 390x844 screenshot",
+        "fresh baseline screenshot",
         "Codex original-size review note",
         "deterministic polish lint result",
         "reviewed_original=true",
@@ -247,7 +294,7 @@
       "implementedEvidence": [
         {
           "id": "fresh_capture",
-          "label": "390x844 fresh screenshot으로 시작 화면을 확인한다.",
+          "label": "baseline viewport fresh screenshot으로 시작 화면을 확인한다.",
           "required": true,
           "passIf": [
             "screen_artifact 또는 polish_lints가 fresh_capture 기준의 기대 상태를 구체 metadata로 충족한다."
@@ -369,7 +416,7 @@
         "copy clarity regression"
       ],
       "requiredEvidence": [
-        "fresh 390x844 screenshot",
+        "fresh baseline screenshot",
         "Codex original-size review note",
         "deterministic polish lint result",
         "related playthrough transcript review"
@@ -714,7 +761,7 @@
         "SSoT name regression"
       ],
       "requiredEvidence": [
-        "fresh 390x844 screenshot",
+        "fresh baseline screenshot",
         "Codex original-size review note",
         "deterministic polish lint result",
         "related playthrough transcript review",
@@ -853,7 +900,7 @@
       "implementedEvidence": [
         {
           "id": "fresh_capture",
-          "label": "390x844 fresh screenshot으로 HUD 화면을 확인한다.",
+          "label": "baseline viewport fresh screenshot으로 HUD 화면을 확인한다.",
           "required": true,
           "passIf": [
             "screen_artifact 또는 polish_lints가 fresh_capture 기준의 기대 상태를 구체 metadata로 충족한다."
@@ -1137,7 +1184,7 @@
         "CTA hierarchy ambiguity"
       ],
       "requiredEvidence": [
-        "fresh 390x844 screenshot",
+        "fresh baseline screenshot",
         "Codex original-size review note",
         "deterministic polish lint result",
         "reviewed_original=true"
@@ -1189,7 +1236,7 @@
       "implementedEvidence": [
         {
           "id": "fresh_capture",
-          "label": "390x844 fresh screenshot으로 HUD 화면을 확인한다.",
+          "label": "baseline viewport fresh screenshot으로 HUD 화면을 확인한다.",
           "required": true,
           "passIf": [
             "screen_artifact 또는 polish_lints가 fresh_capture 기준의 기대 상태를 구체 metadata로 충족한다."
@@ -1325,7 +1372,7 @@
         "copy clarity regression"
       ],
       "requiredEvidence": [
-        "fresh 390x844 screenshot",
+        "fresh baseline screenshot",
         "Codex original-size review note",
         "deterministic polish lint result"
       ],
@@ -1376,7 +1423,7 @@
       "implementedEvidence": [
         {
           "id": "fresh_capture",
-          "label": "390x844 fresh screenshot으로 다이얼로그를 확인한다.",
+          "label": "baseline viewport fresh screenshot으로 다이얼로그를 확인한다.",
           "required": true,
           "passIf": [
             "screen_artifact 또는 polish_lints가 fresh_capture 기준의 기대 상태를 구체 metadata로 충족한다."
@@ -1496,7 +1543,7 @@
         "copy clarity regression"
       ],
       "requiredEvidence": [
-        "fresh 390x844 screenshot",
+        "fresh baseline screenshot",
         "Codex original-size review note",
         "deterministic polish lint result"
       ],
@@ -1547,7 +1594,7 @@
       "implementedEvidence": [
         {
           "id": "fresh_capture",
-          "label": "390x844 fresh screenshot으로 다이얼로그를 확인한다.",
+          "label": "baseline viewport fresh screenshot으로 다이얼로그를 확인한다.",
           "required": true,
           "passIf": [
             "screen_artifact 또는 polish_lints가 fresh_capture 기준의 기대 상태를 구체 metadata로 충족한다."
@@ -1667,7 +1714,7 @@
         "copy clarity regression"
       ],
       "requiredEvidence": [
-        "fresh 390x844 screenshot",
+        "fresh baseline screenshot",
         "Codex original-size review note",
         "deterministic polish lint result"
       ],
@@ -1718,7 +1765,7 @@
       "implementedEvidence": [
         {
           "id": "fresh_capture",
-          "label": "390x844 fresh screenshot으로 다이얼로그를 확인한다.",
+          "label": "baseline viewport fresh screenshot으로 다이얼로그를 확인한다.",
           "required": true,
           "passIf": [
             "screen_artifact 또는 polish_lints가 fresh_capture 기준의 기대 상태를 구체 metadata로 충족한다."
@@ -1847,7 +1894,7 @@
         "dialogue tone mismatch"
       ],
       "requiredEvidence": [
-        "fresh 390x844 screenshot",
+        "fresh baseline screenshot",
         "Codex original-size review note",
         "deterministic polish lint result",
         "related playthrough transcript review",
@@ -1972,7 +2019,7 @@
       "implementedEvidence": [
         {
           "id": "fresh_capture",
-          "label": "390x844 fresh screenshot으로 다이얼로그를 확인한다.",
+          "label": "baseline viewport fresh screenshot으로 다이얼로그를 확인한다.",
           "required": true,
           "passIf": [
             "screen_artifact 또는 polish_lints가 fresh_capture 기준의 기대 상태를 구체 metadata로 충족한다."
@@ -2226,7 +2273,7 @@
         "narrative label missing"
       ],
       "requiredEvidence": [
-        "fresh 390x844 screenshot",
+        "fresh baseline screenshot",
         "Codex original-size review note",
         "deterministic polish lint result",
         "reviewed_original=true",
@@ -2322,7 +2369,7 @@
       "implementedEvidence": [
         {
           "id": "fresh_capture",
-          "label": "390x844 fresh screenshot으로 다이얼로그를 확인한다.",
+          "label": "baseline viewport fresh screenshot으로 다이얼로그를 확인한다.",
           "required": true,
           "passIf": [
             "screen_artifact 또는 polish_lints가 fresh_capture 기준의 기대 상태를 구체 metadata로 충족한다."
@@ -2502,7 +2549,7 @@
         "portrait/background mismatch"
       ],
       "requiredEvidence": [
-        "fresh 390x844 screenshot",
+        "fresh baseline screenshot",
         "Codex original-size review note",
         "deterministic polish lint result",
         "related playthrough transcript review",
@@ -2557,7 +2604,7 @@
       "implementedEvidence": [
         {
           "id": "fresh_capture",
-          "label": "390x844 fresh screenshot으로 외출 화면을 확인한다.",
+          "label": "baseline viewport fresh screenshot으로 외출 화면을 확인한다.",
           "required": true,
           "passIf": [
             "screen_artifact 또는 polish_lints가 fresh_capture 기준의 기대 상태를 구체 metadata로 충족한다."
@@ -2680,7 +2727,7 @@
         "report density"
       ],
       "requiredEvidence": [
-        "fresh 390x844 screenshot",
+        "fresh baseline screenshot",
         "Codex original-size review note",
         "deterministic polish lint result",
         "related playthrough transcript review",
@@ -2823,7 +2870,7 @@
         "summary/detail duplicate copy"
       ],
       "requiredEvidence": [
-        "fresh 390x844 screenshot",
+        "fresh baseline screenshot",
         "Codex original-size review note",
         "deterministic polish lint result",
         "related playthrough transcript review",
@@ -3196,7 +3243,7 @@
         "event prose density"
       ],
       "requiredEvidence": [
-        "fresh 390x844 screenshot",
+        "fresh baseline screenshot",
         "Codex original-size review note",
         "deterministic polish lint result",
         "related playthrough transcript review",
@@ -3569,7 +3616,7 @@
         "scroll bottom crowding"
       ],
       "requiredEvidence": [
-        "fresh 390x844 screenshot",
+        "fresh baseline screenshot",
         "Codex original-size review note",
         "deterministic polish lint result",
         "related playthrough transcript review",
@@ -4056,7 +4103,7 @@
         "choice as command unclear"
       ],
       "requiredEvidence": [
-        "fresh 390x844 screenshot",
+        "fresh baseline screenshot",
         "Codex original-size review note",
         "deterministic polish lint result",
         "related playthrough transcript review",
@@ -4463,7 +4510,7 @@
         "low contrast disabled state"
       ],
       "requiredEvidence": [
-        "fresh 390x844 screenshot",
+        "fresh baseline screenshot",
         "Codex original-size review note",
         "deterministic polish lint result",
         "related playthrough transcript review",
@@ -4870,7 +4917,7 @@
         "effect clarity"
       ],
       "requiredEvidence": [
-        "fresh 390x844 screenshot",
+        "fresh baseline screenshot",
         "Codex original-size review note",
         "deterministic polish lint result",
         "related playthrough transcript review"
@@ -5250,8 +5297,8 @@
     },
     {
       "id": "return_recovery",
-      "screen": "ReturnRecovery",
-      "state": "복귀 회복",
+      "screen": "DragonWorkRecovery",
+      "state": "수습 작전 제안",
       "qaScreen": "returnRecovery",
       "screenshot": "final_19_return_recovery.png",
       "riskTags": [
@@ -5273,7 +5320,7 @@
         "CTA hierarchy"
       ],
       "requiredEvidence": [
-        "fresh 390x844 screenshot",
+        "fresh baseline screenshot",
         "Codex original-size review note",
         "deterministic polish lint result",
         "related playthrough transcript review"
@@ -5281,7 +5328,7 @@
       "expected": [
         {
           "id": "recovery_action_clear",
-          "label": "수습 행동이 무엇을 회복하거나 준비하는지 명확하다.",
+            "label": "수습 작전 제안이 직접 개입과 위임 선택을 명확히 구분한다.",
           "required": true,
           "passIf": [
             "screen_artifact 또는 polish_lints가 recovery_action_clear 기준의 기대 상태를 구체 metadata로 충족한다."
@@ -5295,7 +5342,7 @@
         },
         {
           "id": "recovery_state_change_clear",
-          "label": "복귀 후 상태 변화가 다음 외출 준비와 연결된다.",
+          "label": "수습 후 상태 변화가 다음 외출 준비와 연결된다.",
           "required": true,
           "passIf": [
             "screen_artifact 또는 polish_lints가 recovery_state_change_clear 기준의 기대 상태를 구체 metadata로 충족한다."
@@ -5325,7 +5372,7 @@
       "implementedEvidence": [
         {
           "id": "recovery_cost_effect_review",
-          "label": "수습 비용/효과와 상태 변화를 확인한다.",
+          "label": "수습 작전의 비용/효과와 상태 변화를 확인한다.",
           "required": true,
           "passIf": [
             "screen_artifact 또는 polish_lints가 recovery_cost_effect_review 기준의 기대 상태를 구체 metadata로 충족한다."
@@ -5355,7 +5402,7 @@
         },
         {
           "id": "fixed_ui_overlap",
-          "label": "고정 UI가 회복 행동이나 상태 문구를 덮음",
+          "label": "고정 UI가 수습 행동이나 상태 문구를 덮음",
           "required": true,
           "passIf": [
             "screen_artifact 또는 polish_lints가 fixed_ui_overlap 기준의 기대 상태를 구체 metadata로 충족한다."
@@ -5391,6 +5438,813 @@
       ]
     },
     {
+      "id": "dragon_work_hub",
+      "screen": "DragonWorkHub",
+      "state": "5종 수습 작전 허브",
+      "qaScreen": "dragonWorkHub",
+      "screenshot": "qa_dragon_work_hub.png",
+      "riskTags": [
+        "visual",
+        "ux",
+        "continuity"
+      ],
+      "waitMs": 4500,
+      "fastQaGroup": "dragon_work",
+      "qaCost": "low",
+      "mustReviewAtOriginalSize": true,
+      "acceptanceCriteria": [
+        "5종 수습 작전 카드가 모두 보이고 연습/실전 적용 CTA 의미가 구분되어야 한다.",
+        "한국어 문구가 내부 work id나 개발 용어 없이 플레이어용 용어로 읽혀야 한다.",
+        "짧은 모바일 세로 화면에서 CTA와 카드 제목이 겹치거나 잘리지 않아야 한다."
+      ],
+      "knownRiskPatterns": [
+        "five work card clipping",
+        "practice apply CTA ambiguity",
+        "raw work id visible"
+      ],
+      "requiredEvidence": [
+        "scenario screenshot",
+        "visible text transcript",
+        "CTA metadata"
+      ],
+      "expected": [
+        {
+          "id": "five_work_cards_visible",
+          "label": "5종 수습 작전 카드가 허브에서 모두 확인된다.",
+          "required": true,
+          "passIf": [
+            "scenario_artifacts visibleText 또는 원본 캡처에서 용광로, 마력핵, 저장고, 외곽, 장부 수습 작전이 모두 확인된다."
+          ],
+          "failIf": [
+            "5종 중 하나 이상이 보이지 않거나 카드/제목/CTA가 화면 밖으로 잘린다."
+          ],
+          "blockedIf": [
+            "dragon_work_hub scenario screenshot 또는 visibleText artifact가 없다."
+          ]
+        }
+      ],
+      "implementedEvidence": [
+        {
+          "id": "practice_apply_ctas_visible",
+          "label": "연습과 실전 적용 CTA가 카드별로 구분된다.",
+          "required": true,
+          "passIf": [
+            "CTA metadata 또는 원본 캡처에서 연습과 실전 적용 버튼의 라벨과 enabled/disabled 상태가 확인된다."
+          ],
+          "failIf": [
+            "연습과 실전 적용이 같은 행동처럼 보이거나 비활성 이유가 불명확하다."
+          ],
+          "blockedIf": [
+            "CTA metadata 또는 원본 캡처가 없어 버튼 상태를 판정할 수 없다."
+          ]
+        }
+      ],
+      "forbidden": [
+        {
+          "id": "dragon_work_raw_id_visible",
+          "label": "work id, enum, localization key가 사용자 화면에 보임",
+          "required": true,
+          "passIf": [
+            "visibleText와 원본 캡처에서 forge_breath_timing 같은 내부 id가 보이지 않는다."
+          ],
+          "failIf": [
+            "내부 id, enum name, localization key가 플레이어-facing 문구로 노출된다."
+          ],
+          "blockedIf": [
+            "visibleText 또는 원본 캡처가 없어 내부 id 노출 여부를 확인할 수 없다."
+          ]
+        },
+        {
+          "id": "fixed_ui_overlap",
+          "label": "고정 UI가 카드 제목이나 CTA를 덮음",
+          "required": true,
+          "passIf": [
+            "원본 캡처에서 카드 제목, 설명, CTA가 서로 겹치지 않는다."
+          ],
+          "failIf": [
+            "고정 UI 또는 스크롤 영역이 카드 제목, 설명, CTA를 덮는다."
+          ],
+          "blockedIf": [
+            "원본 캡처가 없어 겹침 여부를 판정할 수 없다."
+          ]
+        }
+      ],
+      "contractChecks": [
+        "five_work_cards_visible",
+        "practice_apply_ctas_visible",
+        "dragon_work_raw_id_visible",
+        "fixed_ui_overlap"
+      ],
+      "failIfMissing": [
+        "five_work_cards_visible",
+        "practice_apply_ctas_visible"
+      ],
+      "failIfPresent": [
+        "dragon_work_raw_id_visible",
+        "fixed_ui_overlap"
+      ],
+      "facets": [
+        "dragon_work",
+        "ux"
+      ],
+      "expectedCharacters": [
+        "lamir",
+        "kael",
+        "ersha",
+        "orden"
+      ]
+    },
+    {
+      "id": "dragon_work_play_forge",
+      "screen": "DragonWorkPlay",
+      "state": "용광로 브레스 조절",
+      "qaScreen": "dragonWorkPlayForge",
+      "screenshot": "qa_dragon_work_play_forge.png",
+      "riskTags": [
+        "visual",
+        "ux",
+        "continuity"
+      ],
+      "waitMs": 4500,
+      "fastQaGroup": "dragon_work",
+      "qaCost": "low",
+      "mustReviewAtOriginalSize": true,
+      "acceptanceCriteria": [
+        "현재 수습 작전의 조작 표면과 완료 CTA가 한 화면 흐름으로 읽혀야 한다.",
+        "미니게임 진행 조작은 하단 action 버튼이 아니라 조작 표면의 터치/스와이프/길게 누르기로 노출되어야 한다.",
+        "점수, 실수, 등급이 내부 raw 값이 아니라 플레이어가 이해할 수 있는 상태로 표시되어야 한다.",
+        "닫기/완료 CTA가 본문 조작과 겹치지 않아야 한다."
+      ],
+      "knownRiskPatterns": [
+        "finish CTA hidden",
+        "raw work id visible",
+        "control surface clipping"
+      ],
+      "requiredEvidence": [
+        "scenario screenshot",
+        "visible text transcript",
+        "CTA metadata"
+      ],
+      "expected": [
+        {
+          "id": "play_body_visible",
+          "label": "용광로 조작 표면과 수습 작전 제목이 보인다.",
+          "required": true,
+          "passIf": [
+            "scenario_artifacts visibleText 또는 원본 캡처에서 용광로 브레스 조절, 열기, 숨결 위치가 확인되고 브레스/강제 진행용 하단 버튼이 보이지 않는다."
+          ],
+          "failIf": [
+            "작전 제목이나 핵심 조작 표면이 보이지 않거나 화면 밖으로 잘린다."
+          ],
+          "blockedIf": [
+            "dragon_work_play_forge scenario screenshot 또는 visibleText artifact가 없다."
+          ]
+        }
+      ],
+      "implementedEvidence": [
+        {
+          "id": "finish_cta_visible",
+          "label": "수습 완료 CTA가 보이고 터치 가능한 상태다.",
+          "required": true,
+          "passIf": [
+            "CTA metadata 또는 원본 캡처에서 수습 완료 CTA가 확인된다."
+          ],
+          "failIf": [
+            "수습 완료 CTA가 보이지 않거나 다른 UI에 가려진다."
+          ],
+          "blockedIf": [
+            "CTA metadata 또는 원본 캡처가 없어 완료 CTA를 확인할 수 없다."
+          ]
+        }
+      ],
+      "forbidden": [
+        {
+          "id": "dragon_work_raw_id_visible",
+          "label": "work id, enum, localization key가 사용자 화면에 보임",
+          "required": true,
+          "passIf": [
+            "visibleText와 원본 캡처에서 forge_breath_timing 같은 내부 id가 보이지 않는다."
+          ],
+          "failIf": [
+            "내부 id, enum name, localization key가 플레이어-facing 문구로 노출된다."
+          ],
+          "blockedIf": [
+            "visibleText 또는 원본 캡처가 없어 내부 id 노출 여부를 확인할 수 없다."
+          ]
+        },
+        {
+          "id": "fixed_ui_overlap",
+          "label": "고정 UI가 조작 표면이나 완료 CTA를 덮음",
+          "required": true,
+          "passIf": [
+            "원본 캡처에서 조작 표면과 완료 CTA가 서로 겹치지 않는다."
+          ],
+          "failIf": [
+            "고정 UI 또는 스크롤 영역이 조작 표면이나 완료 CTA를 덮는다."
+          ],
+          "blockedIf": [
+            "원본 캡처가 없어 겹침 여부를 판정할 수 없다."
+          ]
+        }
+      ],
+      "contractChecks": [
+        "play_body_visible",
+        "finish_cta_visible",
+        "dragon_work_raw_id_visible",
+        "fixed_ui_overlap"
+      ],
+      "failIfMissing": [
+        "play_body_visible",
+        "finish_cta_visible"
+      ],
+      "failIfPresent": [
+        "dragon_work_raw_id_visible",
+        "fixed_ui_overlap"
+      ],
+      "facets": [
+        "dragon_work",
+        "ux"
+      ],
+      "expectedCharacters": [
+        "lamir"
+      ]
+    },
+    {
+      "id": "dragon_work_play_mana_core",
+      "screen": "DragonWorkPlay",
+      "state": "마력핵 룬 융합",
+      "qaScreen": "dragonWorkPlayManaCore",
+      "screenshot": "qa_dragon_work_play_mana_core.png",
+      "riskTags": [
+        "visual",
+        "ux",
+        "continuity"
+      ],
+      "waitMs": 4500,
+      "fastQaGroup": "dragon_work",
+      "qaCost": "low",
+      "mustReviewAtOriginalSize": true,
+      "acceptanceCriteria": [
+        "현재 수습 작전의 조작 표면과 완료 CTA가 한 화면 흐름으로 읽혀야 한다.",
+        "미니게임 진행 조작은 하단 action 버튼이 아니라 조작 표면의 터치/스와이프/길게 누르기로 노출되어야 한다.",
+        "점수, 실수, 등급이 내부 raw 값이 아니라 플레이어가 이해할 수 있는 상태로 표시되어야 한다.",
+        "닫기/완료 CTA가 본문 조작과 겹치지 않아야 한다."
+      ],
+      "knownRiskPatterns": [
+        "finish CTA hidden",
+        "raw work id visible",
+        "control surface clipping"
+      ],
+      "requiredEvidence": [
+        "scenario screenshot",
+        "visible text transcript",
+        "CTA metadata"
+      ],
+      "expected": [
+        {
+          "id": "play_body_visible",
+          "label": "마력핵 룬 융합 조작 표면과 수습 작전 제목이 보인다.",
+          "required": true,
+          "passIf": [
+            "scenario_artifacts visibleText 또는 원본 캡처에서 마력핵 룬 융합과 룬 합성 조작 표면이 확인되고 방향/안정핵 하단 버튼이 보이지 않는다."
+          ],
+          "failIf": [
+            "작전 제목이나 핵심 조작 표면이 보이지 않거나 화면 밖으로 잘린다."
+          ],
+          "blockedIf": [
+            "dragon_work_play_mana_core scenario screenshot 또는 visibleText artifact가 없다."
+          ]
+        }
+      ],
+      "implementedEvidence": [
+        {
+          "id": "finish_cta_visible",
+          "label": "수습 완료 CTA가 보이고 터치 가능한 상태다.",
+          "required": true,
+          "passIf": [
+            "CTA metadata 또는 원본 캡처에서 수습 완료 CTA가 확인된다."
+          ],
+          "failIf": [
+            "수습 완료 CTA가 보이지 않거나 다른 UI에 가려진다."
+          ],
+          "blockedIf": [
+            "CTA metadata 또는 원본 캡처가 없어 완료 CTA를 확인할 수 없다."
+          ]
+        }
+      ],
+      "forbidden": [
+        {
+          "id": "dragon_work_raw_id_visible",
+          "label": "work id, enum, localization key가 사용자 화면에 보임",
+          "required": true,
+          "passIf": [
+            "visibleText와 원본 캡처에서 mana_core_rune_fusion 같은 내부 id가 보이지 않는다."
+          ],
+          "failIf": [
+            "내부 id, enum name, localization key가 플레이어-facing 문구로 노출된다."
+          ],
+          "blockedIf": [
+            "visibleText 또는 원본 캡처가 없어 내부 id 노출 여부를 확인할 수 없다."
+          ]
+        },
+        {
+          "id": "fixed_ui_overlap",
+          "label": "고정 UI가 조작 표면이나 완료 CTA를 덮음",
+          "required": true,
+          "passIf": [
+            "원본 캡처에서 조작 표면과 완료 CTA가 서로 겹치지 않는다."
+          ],
+          "failIf": [
+            "고정 UI 또는 스크롤 영역이 조작 표면이나 완료 CTA를 덮는다."
+          ],
+          "blockedIf": [
+            "원본 캡처가 없어 겹침 여부를 판정할 수 없다."
+          ]
+        }
+      ],
+      "contractChecks": [
+        "play_body_visible",
+        "finish_cta_visible",
+        "dragon_work_raw_id_visible",
+        "fixed_ui_overlap"
+      ],
+      "failIfMissing": [
+        "play_body_visible",
+        "finish_cta_visible"
+      ],
+      "failIfPresent": [
+        "dragon_work_raw_id_visible",
+        "fixed_ui_overlap"
+      ],
+      "facets": [
+        "dragon_work",
+        "ux"
+      ],
+      "expectedCharacters": [
+        "ersha"
+      ]
+    },
+    {
+      "id": "dragon_work_play_vault",
+      "screen": "DragonWorkPlay",
+      "state": "저장고 물자 정리",
+      "qaScreen": "dragonWorkPlayVault",
+      "screenshot": "qa_dragon_work_play_vault.png",
+      "riskTags": [
+        "visual",
+        "ux",
+        "continuity"
+      ],
+      "waitMs": 4500,
+      "fastQaGroup": "dragon_work",
+      "qaCost": "low",
+      "mustReviewAtOriginalSize": true,
+      "acceptanceCriteria": [
+        "현재 수습 작전의 조작 표면과 완료 CTA가 한 화면 흐름으로 읽혀야 한다.",
+        "미니게임 진행 조작은 하단 action 버튼이 아니라 조작 표면의 터치/스와이프/길게 누르기로 노출되어야 한다.",
+        "점수, 실수, 등급이 내부 raw 값이 아니라 플레이어가 이해할 수 있는 상태로 표시되어야 한다.",
+        "닫기/완료 CTA가 본문 조작과 겹치지 않아야 한다."
+      ],
+      "knownRiskPatterns": [
+        "finish CTA hidden",
+        "raw work id visible",
+        "control surface clipping"
+      ],
+      "requiredEvidence": [
+        "scenario screenshot",
+        "visible text transcript",
+        "CTA metadata"
+      ],
+      "expected": [
+        {
+          "id": "play_body_visible",
+          "label": "저장고 물자 정리 조작 표면과 수습 작전 제목이 보인다.",
+          "required": true,
+          "passIf": [
+            "scenario_artifacts visibleText 또는 원본 캡처에서 저장고 물자 정리와 상자/목표 조작 표면이 확인되고 방향/자동 정리 하단 버튼이 보이지 않는다."
+          ],
+          "failIf": [
+            "작전 제목이나 핵심 조작 표면이 보이지 않거나 화면 밖으로 잘린다."
+          ],
+          "blockedIf": [
+            "dragon_work_play_vault scenario screenshot 또는 visibleText artifact가 없다."
+          ]
+        }
+      ],
+      "implementedEvidence": [
+        {
+          "id": "finish_cta_visible",
+          "label": "수습 완료 CTA가 보이고 터치 가능한 상태다.",
+          "required": true,
+          "passIf": [
+            "CTA metadata 또는 원본 캡처에서 수습 완료 CTA가 확인된다."
+          ],
+          "failIf": [
+            "수습 완료 CTA가 보이지 않거나 다른 UI에 가려진다."
+          ],
+          "blockedIf": [
+            "CTA metadata 또는 원본 캡처가 없어 완료 CTA를 확인할 수 없다."
+          ]
+        }
+      ],
+      "forbidden": [
+        {
+          "id": "dragon_work_raw_id_visible",
+          "label": "work id, enum, localization key가 사용자 화면에 보임",
+          "required": true,
+          "passIf": [
+            "visibleText와 원본 캡처에서 vault_crate_sokoban 같은 내부 id가 보이지 않는다."
+          ],
+          "failIf": [
+            "내부 id, enum name, localization key가 플레이어-facing 문구로 노출된다."
+          ],
+          "blockedIf": [
+            "visibleText 또는 원본 캡처가 없어 내부 id 노출 여부를 확인할 수 없다."
+          ]
+        },
+        {
+          "id": "fixed_ui_overlap",
+          "label": "고정 UI가 조작 표면이나 완료 CTA를 덮음",
+          "required": true,
+          "passIf": [
+            "원본 캡처에서 조작 표면과 완료 CTA가 서로 겹치지 않는다."
+          ],
+          "failIf": [
+            "고정 UI 또는 스크롤 영역이 조작 표면이나 완료 CTA를 덮는다."
+          ],
+          "blockedIf": [
+            "원본 캡처가 없어 겹침 여부를 판정할 수 없다."
+          ]
+        }
+      ],
+      "contractChecks": [
+        "play_body_visible",
+        "finish_cta_visible",
+        "dragon_work_raw_id_visible",
+        "fixed_ui_overlap"
+      ],
+      "failIfMissing": [
+        "play_body_visible",
+        "finish_cta_visible"
+      ],
+      "failIfPresent": [
+        "dragon_work_raw_id_visible",
+        "fixed_ui_overlap"
+      ],
+      "facets": [
+        "dragon_work",
+        "ux"
+      ],
+      "expectedCharacters": [
+        "orden"
+      ]
+    },
+    {
+      "id": "dragon_work_play_outskirts",
+      "screen": "DragonWorkPlay",
+      "state": "외곽 흔적 탐색",
+      "qaScreen": "dragonWorkPlayOutskirts",
+      "screenshot": "qa_dragon_work_play_outskirts.png",
+      "riskTags": [
+        "visual",
+        "ux",
+        "continuity"
+      ],
+      "waitMs": 4500,
+      "fastQaGroup": "dragon_work",
+      "qaCost": "low",
+      "mustReviewAtOriginalSize": true,
+      "acceptanceCriteria": [
+        "현재 수습 작전의 조작 표면과 완료 CTA가 한 화면 흐름으로 읽혀야 한다.",
+        "미니게임 진행 조작은 하단 action 버튼이 아니라 조작 표면의 터치/스와이프/길게 누르기로 노출되어야 한다.",
+        "점수, 실수, 등급이 내부 raw 값이 아니라 플레이어가 이해할 수 있는 상태로 표시되어야 한다.",
+        "닫기/완료 CTA가 본문 조작과 겹치지 않아야 한다."
+      ],
+      "knownRiskPatterns": [
+        "finish CTA hidden",
+        "raw work id visible",
+        "control surface clipping"
+      ],
+      "requiredEvidence": [
+        "scenario screenshot",
+        "visible text transcript",
+        "CTA metadata"
+      ],
+      "expected": [
+        {
+          "id": "play_body_visible",
+          "label": "외곽 흔적 탐색 조작 표면과 수습 작전 제목이 보인다.",
+          "required": true,
+          "passIf": [
+            "scenario_artifacts visibleText 또는 원본 캡처에서 외곽 흔적 탐색과 안전/위험 표식 조작 표면이 확인되고 판독/표식 전환 하단 버튼이 보이지 않는다."
+          ],
+          "failIf": [
+            "작전 제목이나 핵심 조작 표면이 보이지 않거나 화면 밖으로 잘린다."
+          ],
+          "blockedIf": [
+            "dragon_work_play_outskirts scenario screenshot 또는 visibleText artifact가 없다."
+          ]
+        }
+      ],
+      "implementedEvidence": [
+        {
+          "id": "finish_cta_visible",
+          "label": "수습 완료 CTA가 보이고 터치 가능한 상태다.",
+          "required": true,
+          "passIf": [
+            "CTA metadata 또는 원본 캡처에서 수습 완료 CTA가 확인된다."
+          ],
+          "failIf": [
+            "수습 완료 CTA가 보이지 않거나 다른 UI에 가려진다."
+          ],
+          "blockedIf": [
+            "CTA metadata 또는 원본 캡처가 없어 완료 CTA를 확인할 수 없다."
+          ]
+        }
+      ],
+      "forbidden": [
+        {
+          "id": "dragon_work_raw_id_visible",
+          "label": "work id, enum, localization key가 사용자 화면에 보임",
+          "required": true,
+          "passIf": [
+            "visibleText와 원본 캡처에서 outskirts_trace_sweep 같은 내부 id가 보이지 않는다."
+          ],
+          "failIf": [
+            "내부 id, enum name, localization key가 플레이어-facing 문구로 노출된다."
+          ],
+          "blockedIf": [
+            "visibleText 또는 원본 캡처가 없어 내부 id 노출 여부를 확인할 수 없다."
+          ]
+        },
+        {
+          "id": "fixed_ui_overlap",
+          "label": "고정 UI가 조작 표면이나 완료 CTA를 덮음",
+          "required": true,
+          "passIf": [
+            "원본 캡처에서 조작 표면과 완료 CTA가 서로 겹치지 않는다."
+          ],
+          "failIf": [
+            "고정 UI 또는 스크롤 영역이 조작 표면이나 완료 CTA를 덮는다."
+          ],
+          "blockedIf": [
+            "원본 캡처가 없어 겹침 여부를 판정할 수 없다."
+          ]
+        }
+      ],
+      "contractChecks": [
+        "play_body_visible",
+        "finish_cta_visible",
+        "dragon_work_raw_id_visible",
+        "fixed_ui_overlap"
+      ],
+      "failIfMissing": [
+        "play_body_visible",
+        "finish_cta_visible"
+      ],
+      "failIfPresent": [
+        "dragon_work_raw_id_visible",
+        "fixed_ui_overlap"
+      ],
+      "facets": [
+        "dragon_work",
+        "ux"
+      ],
+      "expectedCharacters": [
+        "kael"
+      ]
+    },
+    {
+      "id": "dragon_work_play_ledger",
+      "screen": "DragonWorkPlay",
+      "state": "장부/운영 수습",
+      "qaScreen": "dragonWorkPlayLedger",
+      "screenshot": "qa_dragon_work_play_ledger.png",
+      "riskTags": [
+        "visual",
+        "ux",
+        "continuity"
+      ],
+      "waitMs": 4500,
+      "fastQaGroup": "dragon_work",
+      "qaCost": "low",
+      "mustReviewAtOriginalSize": true,
+      "acceptanceCriteria": [
+        "현재 수습 작전의 조작 표면과 완료 CTA가 한 화면 흐름으로 읽혀야 한다.",
+        "미니게임 진행 조작은 하단 action 버튼이 아니라 조작 표면의 터치/스와이프/길게 누르기로 노출되어야 한다.",
+        "점수, 실수, 등급이 내부 raw 값이 아니라 플레이어가 이해할 수 있는 상태로 표시되어야 한다.",
+        "닫기/완료 CTA가 본문 조작과 겹치지 않아야 한다."
+      ],
+      "knownRiskPatterns": [
+        "finish CTA hidden",
+        "raw work id visible",
+        "control surface clipping"
+      ],
+      "requiredEvidence": [
+        "scenario screenshot",
+        "visible text transcript",
+        "CTA metadata"
+      ],
+      "expected": [
+        {
+          "id": "play_body_visible",
+          "label": "장부/운영 수습 조작 표면과 수습 작전 제목이 보인다.",
+          "required": true,
+          "passIf": [
+            "scenario_artifacts visibleText 또는 원본 캡처에서 장부/운영 수습과 카드/묶음 조작 표면이 확인되고 권장 배치/장부 제출 하단 버튼이 보이지 않는다."
+          ],
+          "failIf": [
+            "작전 제목이나 핵심 조작 표면이 보이지 않거나 화면 밖으로 잘린다."
+          ],
+          "blockedIf": [
+            "dragon_work_play_ledger scenario screenshot 또는 visibleText artifact가 없다."
+          ]
+        }
+      ],
+      "implementedEvidence": [
+        {
+          "id": "finish_cta_visible",
+          "label": "수습 완료 CTA가 보이고 터치 가능한 상태다.",
+          "required": true,
+          "passIf": [
+            "CTA metadata 또는 원본 캡처에서 수습 완료 CTA가 확인된다."
+          ],
+          "failIf": [
+            "수습 완료 CTA가 보이지 않거나 다른 UI에 가려진다."
+          ],
+          "blockedIf": [
+            "CTA metadata 또는 원본 캡처가 없어 완료 CTA를 확인할 수 없다."
+          ]
+        }
+      ],
+      "forbidden": [
+        {
+          "id": "dragon_work_raw_id_visible",
+          "label": "work id, enum, localization key가 사용자 화면에 보임",
+          "required": true,
+          "passIf": [
+            "visibleText와 원본 캡처에서 ledger_operations_sort 같은 내부 id가 보이지 않는다."
+          ],
+          "failIf": [
+            "내부 id, enum name, localization key가 플레이어-facing 문구로 노출된다."
+          ],
+          "blockedIf": [
+            "visibleText 또는 원본 캡처가 없어 내부 id 노출 여부를 확인할 수 없다."
+          ]
+        },
+        {
+          "id": "fixed_ui_overlap",
+          "label": "고정 UI가 조작 표면이나 완료 CTA를 덮음",
+          "required": true,
+          "passIf": [
+            "원본 캡처에서 조작 표면과 완료 CTA가 서로 겹치지 않는다."
+          ],
+          "failIf": [
+            "고정 UI 또는 스크롤 영역이 조작 표면이나 완료 CTA를 덮는다."
+          ],
+          "blockedIf": [
+            "원본 캡처가 없어 겹침 여부를 판정할 수 없다."
+          ]
+        }
+      ],
+      "contractChecks": [
+        "play_body_visible",
+        "finish_cta_visible",
+        "dragon_work_raw_id_visible",
+        "fixed_ui_overlap"
+      ],
+      "failIfMissing": [
+        "play_body_visible",
+        "finish_cta_visible"
+      ],
+      "failIfPresent": [
+        "dragon_work_raw_id_visible",
+        "fixed_ui_overlap"
+      ],
+      "facets": [
+        "dragon_work",
+        "ux"
+      ],
+      "expectedCharacters": [
+        "orden"
+      ]
+    },
+    {
+      "id": "dragon_work_result_forge",
+      "screen": "DragonWorkResult",
+      "state": "용광로 수습 결과",
+      "qaScreen": "dragonWorkResultForge",
+      "screenshot": "qa_dragon_work_result_forge.png",
+      "riskTags": [
+        "copy",
+        "ux",
+        "continuity"
+      ],
+      "waitMs": 4500,
+      "fastQaGroup": "dragon_work",
+      "qaCost": "low",
+      "mustReviewAtOriginalSize": true,
+      "acceptanceCriteria": [
+        "수습 결과 제목, 본문, 연습/실전 적용 안내가 서로 다른 역할로 읽혀야 한다.",
+        "거점 복귀 CTA가 결과 확인 뒤 다음 행동으로 명확해야 한다.",
+        "결과 화면에 내부 rank enum, work id, localization key가 노출되지 않아야 한다."
+      ],
+      "knownRiskPatterns": [
+        "result copy repetition",
+        "raw rank visible",
+        "back CTA hidden"
+      ],
+      "requiredEvidence": [
+        "scenario screenshot",
+        "visible text transcript",
+        "CTA metadata"
+      ],
+      "expected": [
+        {
+          "id": "result_copy_visible",
+          "label": "수습 결과 제목과 본문이 확인된다.",
+          "required": true,
+          "passIf": [
+            "scenario_artifacts visibleText 또는 원본 캡처에서 결과 제목, 결과 설명, 가디언 반응이 확인된다."
+          ],
+          "failIf": [
+            "결과 제목이나 설명이 보이지 않거나 같은 문구가 의미 없이 반복된다."
+          ],
+          "blockedIf": [
+            "dragon_work_result_forge scenario screenshot 또는 visibleText artifact가 없다."
+          ]
+        }
+      ],
+      "implementedEvidence": [
+        {
+          "id": "back_to_base_cta_visible",
+          "label": "거점 복귀 CTA가 보이고 터치 가능한 상태다.",
+          "required": true,
+          "passIf": [
+            "CTA metadata 또는 원본 캡처에서 거점으로 돌아가기 CTA가 확인된다."
+          ],
+          "failIf": [
+            "거점 복귀 CTA가 보이지 않거나 다른 UI에 가려진다."
+          ],
+          "blockedIf": [
+            "CTA metadata 또는 원본 캡처가 없어 거점 복귀 CTA를 확인할 수 없다."
+          ]
+        }
+      ],
+      "forbidden": [
+        {
+          "id": "dragon_work_raw_id_visible",
+          "label": "work id, enum, localization key가 사용자 화면에 보임",
+          "required": true,
+          "passIf": [
+            "visibleText와 원본 캡처에서 내부 id, rank enum, localization key가 보이지 않는다."
+          ],
+          "failIf": [
+            "내부 id, enum name, localization key가 플레이어-facing 문구로 노출된다."
+          ],
+          "blockedIf": [
+            "visibleText 또는 원본 캡처가 없어 내부 id 노출 여부를 확인할 수 없다."
+          ]
+        },
+        {
+          "id": "fixed_ui_overlap",
+          "label": "고정 UI가 결과 문구나 거점 복귀 CTA를 덮음",
+          "required": true,
+          "passIf": [
+            "원본 캡처에서 결과 문구와 거점 복귀 CTA가 서로 겹치지 않는다."
+          ],
+          "failIf": [
+            "고정 UI 또는 스크롤 영역이 결과 문구나 거점 복귀 CTA를 덮는다."
+          ],
+          "blockedIf": [
+            "원본 캡처가 없어 겹침 여부를 판정할 수 없다."
+          ]
+        }
+      ],
+      "contractChecks": [
+        "result_copy_visible",
+        "back_to_base_cta_visible",
+        "dragon_work_raw_id_visible",
+        "fixed_ui_overlap"
+      ],
+      "failIfMissing": [
+        "result_copy_visible",
+        "back_to_base_cta_visible"
+      ],
+      "failIfPresent": [
+        "dragon_work_raw_id_visible",
+        "fixed_ui_overlap"
+      ],
+      "facets": [
+        "dragon_work",
+        "result",
+        "ux"
+      ],
+      "expectedCharacters": [
+        "lamir"
+      ]
+    },
+    {
       "id": "report_archive_empty",
       "screen": "ReportArchive",
       "state": "empty",
@@ -5413,7 +6267,7 @@
         "unclear value of archive"
       ],
       "requiredEvidence": [
-        "fresh 390x844 screenshot",
+        "fresh baseline screenshot",
         "Codex original-size review note",
         "deterministic polish lint result"
       ],
@@ -5571,7 +6425,7 @@
         "record naming regression"
       ],
       "requiredEvidence": [
-        "fresh 390x844 screenshot",
+        "fresh baseline screenshot",
         "Codex original-size review note",
         "deterministic polish lint result",
         "related playthrough transcript review",
@@ -5730,7 +6584,7 @@
         "event continuity gap"
       ],
       "requiredEvidence": [
-        "fresh 390x844 screenshot",
+        "fresh baseline screenshot",
         "Codex original-size review note",
         "deterministic polish lint result",
         "related playthrough transcript review",
@@ -6088,7 +6942,7 @@
         "next cycle clarity"
       ],
       "requiredEvidence": [
-        "fresh 390x844 screenshot",
+        "fresh baseline screenshot",
         "Codex original-size review note",
         "deterministic polish lint result",
         "related playthrough transcript review",
@@ -6285,7 +7139,7 @@
         "cycle differentiation weak"
       ],
       "requiredEvidence": [
-        "fresh 390x844 screenshot",
+        "fresh baseline screenshot",
         "Codex original-size review note",
         "deterministic polish lint result",
         "related playthrough transcript review",
@@ -6482,7 +7336,7 @@
         "ending payoff density"
       ],
       "requiredEvidence": [
-        "fresh 390x844 screenshot",
+        "fresh baseline screenshot",
         "Codex original-size review note",
         "deterministic polish lint result",
         "related playthrough transcript review",

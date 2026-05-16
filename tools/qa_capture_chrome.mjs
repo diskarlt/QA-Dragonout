@@ -357,7 +357,9 @@ function deriveGroupsFromChangedFiles(files) {
   const groups = new Set();
   for (const file of files) {
     const normalized = file.replaceAll('\\', '/');
-    if (normalized.includes('theme') || normalized.includes('hud') || normalized.includes('screen_frame') || normalized.includes('common')) {
+    if (normalized.includes('dragon_work')) {
+      groups.add('dragon_work');
+    } else if (normalized.includes('theme') || normalized.includes('hud') || normalized.includes('screen_frame') || normalized.includes('common')) {
       ['base', 'base_dialog', 'event', 'report', 'ending'].forEach((group) => groups.add(group));
     } else if (normalized.includes('l10n') || normalized.includes('copy') || normalized.includes('content') || normalized.includes('event_card') || normalized.endsWith('CONTENT.md')) {
       ['report', 'event', 'archive', 'ending', 'regression'].forEach((group) => groups.add(group));

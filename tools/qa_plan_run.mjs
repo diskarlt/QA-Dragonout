@@ -94,6 +94,13 @@ function buildPlan(files) {
 }
 
 function ruleFor(file) {
+  if (file.includes('dragon_work')) {
+    return {
+      groups: ['dragon_work'],
+      full: false,
+      reason: 'Dragon Work 구현/asset 변경: Dragon Work 전용 화면 fast QA',
+    };
+  }
   if (file.startsWith('tools/qa_') || file.startsWith('docs/qa/')) {
     return {
       groups: ['base'],

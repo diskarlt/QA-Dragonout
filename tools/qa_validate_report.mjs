@@ -785,12 +785,13 @@ async function validateCalibrationQueuePromotion() {
   const flowById = new Map((playthroughReview.flows ?? []).map((flow) => [flow.flow_id, flow]));
   const globalFindings = productReview.global_visual_findings ?? [];
   const fixedRuleIds = new Set(fixedRules.map((rule) => rule.rule_id));
+  const activeFixedRules = fixedRulesForCurrentRun(playthroughReview, globalFindings);
   const fixedRuleModeActive =
     (productReview.screens ?? []).some((screen) => (screen.fixed_rules ?? []).length > 0) ||
     (playthroughReview.flows ?? []).some((flow) => (flow.fixed_rules ?? []).length > 0) ||
     globalFindings.length > 0;
   if (fixedRuleModeActive) {
-    for (const rule of fixedRules) {
+    for (const rule of activeFixedRules) {
       const findings = findingsForRule(rule, { productById, flowById, globalFindings });
       const qaIssues = qaIssuesForRule(rule, { productById, flowById, productReview });
       if (findings.length === 0 && qaIssues.length === 0) {
@@ -837,6 +838,16 @@ async function validateCalibrationQueuePromotion() {
       errors.push(`profile accepted candidate cannot enter development queue without fixed QA rule: ${candidateId}`);
     }
   }
+}
+
+function fixedRulesForCurrentRun(playthroughReview, globalFindings) {
+  if (qaMode !== 'fast') return fixedRules;
+  const activeScreenIds = new Set(requiredScreens.map((screen) => screen.id));
+  const activeFlowIds = new Set((playthroughReview.flows ?? []).map((flow) => flow.flow_id));
+  return fixedRules.filter((rule) => {
+    if (rule.type === 'global_visual') return globalFindings.length > 0;
+    return activeScreenIds.has(rule.target_id) || activeFlowIds.has(rule.target_id);
+  });
 }
 
 async function validateFixedRules() {
